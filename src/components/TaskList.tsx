@@ -28,6 +28,28 @@ function formatDateLabel(iso: string) {
 // Where the task will be inserted: before `beforeTaskId`, or append to `iso` if null
 type DropLine = { iso: string; beforeTaskId: string | null } | null;
 
+// Defined outside TaskList so the component type is stable across re-renders.
+// If defined inside, every dropLine state change creates a new type → React
+// unmounts/remounts the nodes → mouseenter never re-fires → drop target freezes.
+function DropZone({
+  iso, beforeTaskId, tall, isActive, onHover,
+}: {
+  iso: string;
+  beforeTaskId: string | null;
+  tall?: boolean;
+  isActive: boolean;
+  onHover: () => void;
+}) {
+  return (
+    <View
+      style={[styles.dropZone, tall && styles.dropZoneTall]}
+      {...(IS_WEB ? { onMouseEnter: onHover } as any : {})}
+    >
+      <View style={[styles.dropZoneLine, isActive && styles.dropZoneLineActive]} />
+    </View>
+  );
+}
+
 interface Props {
   tasks: Task[];
   categories: Category[];
@@ -137,7 +159,6 @@ export default function TaskList({
 
   const hoverDropZone = (iso: string, beforeTaskId: string | null) => {
     if (!isDraggingRef.current) return;
-    // Hovering the zone before the dragging task itself is a no-op — skip
     if (beforeTaskId === dragIdRef.current) return;
     setDropLineBoth({ iso, beforeTaskId });
   };
@@ -167,27 +188,8 @@ export default function TaskList({
     return day.length ? day[day.length - 1].categoryCode : 'GEN';
   };
 
-  // ── Drop zone strip (insertion line) ─────────────────────────────────────
-  const DropZone = ({ iso, beforeTaskId, tall }: {
-    iso: string;
-    beforeTaskId: string | null;
-    tall?: boolean;
-  }) => {
-    const active =
-      dropLine !== null &&
-      dropLine.iso === iso &&
-      dropLine.beforeTaskId === beforeTaskId;
-    return (
-      <View
-        style={[styles.dropZone, tall && styles.dropZoneTall]}
-        {...(IS_WEB
-          ? { onMouseEnter: () => hoverDropZone(iso, beforeTaskId) } as any
-          : {})}
-      >
-        {active && <View style={styles.dropZoneLine} />}
-      </View>
-    );
-  };
+  const isDropZoneActive = (iso: string, beforeTaskId: string | null) =>
+    dropLine !== null && dropLine.iso === iso && dropLine.beforeTaskId === beforeTaskId;
 
   // ── Ghost ─────────────────────────────────────────────────────────────────
   const ghostCat = ghostTask ? getCat(ghostTask.categoryCode) : null;
@@ -216,10 +218,24 @@ export default function TaskList({
                 iso={iso}
                 beforeTaskId={dayTasks[0]?.id ?? null}
                 tall={dayTasks.length === 0}
+                isActive={isDropZoneActive(iso, dayTasks[0]?.id ?? null)}
+                onHover={() => hoverDropZone(iso, dayTasks[0]?.id ?? null)}
               />
 
-              {dayTasks.map((task, i) => (
-                <View key={task.id}>
+              {dayTasks.map((task, i) => {
+                // Hovering the task body = "drop after this task" (large ~40px target).
+                // The 8px DropZone above it handles the rarer "drop before" case.
+                const afterId = dayTasks[i + 1]?.id ?? null;
+                const rowHoverProps = IS_WEB ? {
+                  onMouseEnter: () => {
+                    if (!isDraggingRef.current) return;
+                    const target = afterId === dragIdRef.current ? null : afterId;
+                    setDropLineBoth({ iso, beforeTaskId: target });
+                  },
+                } as any : {};
+
+                return (
+                <View key={task.id} {...rowHoverProps}>
                   <TaskRow
                     task={task}
                     category={getCat(task.categoryCode)}
@@ -246,9 +262,12 @@ export default function TaskList({
                   <DropZone
                     iso={iso}
                     beforeTaskId={dayTasks[i + 1]?.id ?? null}
+                    isActive={isDropZoneActive(iso, dayTasks[i + 1]?.id ?? null)}
+                    onHover={() => hoverDropZone(iso, dayTasks[i + 1]?.id ?? null)}
                   />
                 </View>
-              ))}
+                );
+              })}
 
               {filter === 'all' && !catFilter && (
                 <ExpressEntry
@@ -304,7 +323,10 @@ const styles = StyleSheet.create({
     height: 2,
     backgroundColor: theme.accent,
     borderRadius: 1,
-    opacity: 0.85,
+    opacity: 0,
+  },
+  dropZoneLineActive: {
+    opacity: 1,
   },
   showMoreBtn: {
     borderWidth: 1,
