@@ -32,17 +32,27 @@ type DropLine = { iso: string; beforeTaskId: string | null } | null;
 // If defined inside, every dropLine state change creates a new type → React
 // unmounts/remounts the nodes → mouseenter never re-fires → drop target freezes.
 function DropZone({
-  iso, beforeTaskId, tall, isActive, onHover,
+  iso, beforeTaskId, isActive, onHover, registerView,
 }: {
   iso: string;
   beforeTaskId: string | null;
-  tall?: boolean;
   isActive: boolean;
   onHover: () => void;
+  registerView?: (key: string, view: View | null) => void;
 }) {
+  const viewRef = useRef<View | null>(null);
+  const key = `${iso}|${beforeTaskId ?? 'end'}`;
+
+  useEffect(() => {
+    if (!registerView) return;
+    registerView(key, viewRef.current);
+    return () => registerView(key, null);
+  }, [key, registerView]);
+
   return (
     <View
-      style={[styles.dropZone, tall && styles.dropZoneTall]}
+      ref={viewRef}
+      style={styles.dropZone}
       {...(IS_WEB ? { onMouseEnter: onHover } as any : {})}
     >
       <View style={[styles.dropZoneLine, isActive && styles.dropZoneLineActive]} />
@@ -85,6 +95,11 @@ export default function TaskList({
   const [dropLine, setDropLine] = useState<DropLine>(null);
   const [ghostTask, setGhostTask] = useState<Task | null>(null);
   const [ghostPos, setGhostPos] = useState({ x: 0, y: 0 });
+
+  // Only one ExpressEntry can be active at a time. Inactive ones render as
+  // Pressables (no TextInput) so the keyboard / InputConnection doesn't get
+  // shared/stolen between sibling text inputs.
+  const [activeExpressDate, setActiveExpressDate] = useState<string | null>(null);
 
   const isDraggingRef = useRef(false);
   const dragIdRef = useRef<string | null>(null);
@@ -163,6 +178,61 @@ export default function TaskList({
     setDropLineBoth({ iso, beforeTaskId });
   };
 
+  // ── Native drag (Android/iOS) ─────────────────────────────────────────────
+  // The handle on TaskRow attaches a long-press-activated Gesture.Pan. While
+  // it pans, we find the drop zone whose center is closest to the finger Y.
+  // Positions are measured (via measureInWindow) at drag start — cheap, and
+  // accurate enough for the user not to feel any drift.
+  const dropZoneViewRefs = useRef<Map<string, View>>(new Map());
+  const measuredDropZones = useRef<Array<{ y: number; height: number; iso: string; beforeTaskId: string | null }>>([]);
+
+  const registerDropZoneView = useCallback((key: string, view: View | null) => {
+    if (view) dropZoneViewRefs.current.set(key, view);
+    else dropZoneViewRefs.current.delete(key);
+  }, []);
+
+  const measureAllDropZones = useCallback(() => {
+    measuredDropZones.current = [];
+    for (const [key, view] of dropZoneViewRefs.current) {
+      const [iso, suffix] = key.split('|');
+      const beforeTaskId = suffix === 'end' ? null : suffix;
+      view.measureInWindow((_x, y, _w, height) => {
+        measuredDropZones.current.push({ y, height, iso, beforeTaskId });
+      });
+    }
+  }, []);
+
+  const startNativeDrag = useCallback((taskId: string) => {
+    const t = tasksRef.current.find((x) => x.id === taskId);
+    if (!t) return;
+    isDraggingRef.current = true;
+    dragIdRef.current = taskId;
+    setDraggingId(taskId);
+    measureAllDropZones();
+  }, [measureAllDropZones]);
+
+  const updateNativeDrag = useCallback((absoluteY: number) => {
+    if (!isDraggingRef.current) return;
+    let bestDl: DropLine = null;
+    let bestDist = Infinity;
+    for (const item of measuredDropZones.current) {
+      const centerY = item.y + item.height / 2;
+      const dist = Math.abs(centerY - absoluteY);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDl = { iso: item.iso, beforeTaskId: item.beforeTaskId };
+      }
+    }
+    if (bestDl) {
+      const beforeTaskId = bestDl.beforeTaskId === dragIdRef.current ? null : bestDl.beforeTaskId;
+      setDropLineBoth({ iso: bestDl.iso, beforeTaskId });
+    }
+  }, []);
+
+  const endNativeDrag = useCallback(() => {
+    commitDrop();
+  }, [commitDrop]);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getCat = (code: string): Category =>
     categories.find((c) => c.code === code) ?? { code, color: theme.cream3, title: code };
@@ -200,7 +270,9 @@ export default function TaskList({
       <ScrollView style={styles.root} contentContainerStyle={styles.content}>
         {dates.map((iso) => {
           const dayTasks = visibleTasks(iso);
-          if (dayTasks.length === 0 && filter !== 'all') return null;
+          // TODO+ALL: show empty future days so you can add to them.
+          // DONE: only show days that actually have completed tasks.
+          if (dayTasks.length === 0 && filter === 'done') return null;
           const isPast = iso < today;
           const isToday = iso === today;
           const labelColor = isPast ? theme.cream3 : isToday ? theme.cream : theme.accent;
@@ -213,13 +285,15 @@ export default function TaskList({
                 </Text>
               </View>
 
-              {/* Drop zone above first task (or sole zone for empty days) */}
+              {/* Drop zone above first task. We no longer use a "tall" variant
+                  for empty days — the ExpressEntry placeholder below already
+                  reserves room and the tall strip was leaving an ugly gap. */}
               <DropZone
                 iso={iso}
                 beforeTaskId={dayTasks[0]?.id ?? null}
-                tall={dayTasks.length === 0}
                 isActive={isDropZoneActive(iso, dayTasks[0]?.id ?? null)}
                 onHover={() => hoverDropZone(iso, dayTasks[0]?.id ?? null)}
+                registerView={IS_WEB ? undefined : registerDropZoneView}
               />
 
               {dayTasks.map((task, i) => {
@@ -248,6 +322,9 @@ export default function TaskList({
                         ? (e: any) => { e.preventDefault(); startDrag(task.id, task, e.clientX, e.clientY); }
                         : undefined
                     }
+                    onNativeDragStart={IS_WEB ? undefined : () => startNativeDrag(task.id)}
+                    onNativeDragUpdate={IS_WEB ? undefined : updateNativeDrag}
+                    onNativeDragEnd={IS_WEB ? undefined : endNativeDrag}
                     onToggle={() => onToggle(task.id)}
                     onDelete={() => onDelete(task.id)}
                     onMoveToToday={() => onMoveToToday(task.id)}
@@ -264,17 +341,21 @@ export default function TaskList({
                     beforeTaskId={dayTasks[i + 1]?.id ?? null}
                     isActive={isDropZoneActive(iso, dayTasks[i + 1]?.id ?? null)}
                     onHover={() => hoverDropZone(iso, dayTasks[i + 1]?.id ?? null)}
+                    registerView={IS_WEB ? undefined : registerDropZoneView}
                   />
                 </View>
                 );
               })}
 
-              {filter === 'all' && !catFilter && (
+              {!catFilter && (
                 <ExpressEntry
                   isoDate={iso}
                   defaultCat={defaultExpressCat(iso)}
                   categories={categories}
                   onCommit={(text, cat) => onExpressCommit(iso, text, cat)}
+                  isActive={activeExpressDate === iso}
+                  onActivate={() => setActiveExpressDate(iso)}
+                  onDeactivate={() => setActiveExpressDate(null)}
                 />
               )}
             </View>
@@ -301,23 +382,19 @@ export default function TaskList({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  content: { paddingHorizontal: 18, paddingBottom: 100 },
-  dateSection: { marginTop: 20 },
+  content: { paddingHorizontal: 20, paddingBottom: 110 },
+  dateSection: { marginTop: 22 },
   dateHeader: {
-    paddingBottom: 6,
+    paddingBottom: 7,
     borderBottomWidth: 1,
     borderBottomColor: theme.borderSubtle,
     marginBottom: 2,
   },
-  dateLabel: { fontFamily: 'monospace', fontSize: 9, letterSpacing: 3 },
+  dateLabel: { fontFamily: 'monospace', fontSize: 11, letterSpacing: 3 },
   // Drop zone strip
   dropZone: {
-    height: 8,
+    height: 9,
     justifyContent: 'center',
-  },
-  dropZoneTall: {
-    // Empty-day target: larger hit area so it's easy to drop into
-    height: 32,
   },
   dropZoneLine: {
     height: 2,
@@ -333,12 +410,12 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: theme.borderSubtle,
     borderRadius: 4,
-    paddingVertical: 10,
+    paddingVertical: 11,
     alignItems: 'center',
-    marginTop: 24,
-    marginBottom: 8,
+    marginTop: 26,
+    marginBottom: 9,
   },
-  showMoreText: { color: theme.cream3, fontFamily: 'monospace', fontSize: 9, letterSpacing: 2.5 },
+  showMoreText: { color: theme.cream3, fontFamily: 'monospace', fontSize: 11, letterSpacing: 2.5 },
   ghost: {
     position: 'fixed' as any,
     zIndex: 9999,
@@ -359,5 +436,5 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
   },
   ghostDot: { width: 8, height: 8, borderRadius: 4, flexShrink: 0 },
-  ghostText: { color: theme.cream, fontFamily: 'monospace', fontSize: 12, flexShrink: 1 },
+  ghostText: { color: theme.cream, fontFamily: 'monospace', fontSize: 14, flexShrink: 1 },
 });

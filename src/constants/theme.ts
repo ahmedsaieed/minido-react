@@ -1,11 +1,11 @@
 export const theme = {
-  bg: '#3a3830',
-  surface: '#322f28',
-  surfaceDeep: '#2a2822',
+  bg: '#312f29',
+  surface: '#2a2822',
+  surfaceDeep: '#22201c',
   cream: '#e8e2d4',
   cream2: '#c8c0b0',
   cream3: '#7a7468',
   accent: '#d4c9a8',
-  border: '#4a4640',
-  borderSubtle: '#3e3b34',
+  border: '#3f3c36',
+  borderSubtle: '#34322c',
 } as const;

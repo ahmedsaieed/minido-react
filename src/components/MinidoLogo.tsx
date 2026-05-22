@@ -7,7 +7,7 @@ interface Props {
   color?: string;
 }
 
-export default function MinidoLogo({ width = 104, height = 18, color = theme.cream }: Props) {
+export default function MinidoLogo({ width = 125, height = 22, color = theme.cream }: Props) {
   const scale = width / 130;
   const h = height;
   return (

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Platform, SafeAreaView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { useFonts, DMMono_300Light, DMMono_400Regular, DMMono_500Medium } from '@expo-google-fonts/dm-mono';
 import { DEFAULT_CATEGORIES } from './src/constants/defaultCategories';
 import { theme } from './src/constants/theme';
@@ -48,7 +49,7 @@ export default function App() {
     toggleDone, moveTask, changeCategory, addCategory,
   } = useTaskStore();
 
-  const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('all');
+  const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('todo');
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [futureDays, setFutureDays] = useState(8);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -57,6 +58,12 @@ export default function App() {
   const [showCatModal, setShowCatModal] = useState(false);
 
   const today = todayISO();
+
+  // Refs so callbacks don't need tasks/editText in their dep arrays
+  const tasksRef = useRef(tasks);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  const editTextRef = useRef(editText);
+  useEffect(() => { editTextRef.current = editText; }, [editText]);
 
   // ── DB init ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -87,12 +94,12 @@ export default function App() {
     const now = new Date().toISOString();
     const task: Task = {
       id: uuid(), text, categoryCode, isoDate, done: false,
-      sortOrder: tasks.filter((t) => t.isoDate === isoDate).length,
+      sortOrder: tasksRef.current.filter((t) => t.isoDate === isoDate).length,
       createdAt: now, updatedAt: now,
     };
     if (!IS_WEB) { try { dbCreateTask(task); } catch (e) { console.warn(e); } }
     addTask(task);
-  }, [tasks]);
+  }, [addTask]);
 
   const handleExpressCommit = useCallback((isoDate: string, text: string, categoryCode: string) => {
     handleAddTask(text, categoryCode, isoDate);
@@ -126,16 +133,17 @@ export default function App() {
   }, []);
 
   const handleEditEnd = useCallback((id: string) => {
-    if (!editText.trim()) {
+    const txt = editTextRef.current.trim();
+    if (!txt) {
       handleDelete(id);
     } else {
-      updateTask(id, { text: editText.trim() });
+      updateTask(id, { text: txt });
       if (!IS_WEB) {
-        try { dbUpdateTask(id, { text: editText.trim(), updatedAt: new Date().toISOString() }); } catch (e) { console.warn(e); }
+        try { dbUpdateTask(id, { text: txt, updatedAt: new Date().toISOString() }); } catch (e) { console.warn(e); }
       }
     }
     setEditingId(null);
-  }, [editText]);
+  }, [handleDelete, updateTask]);
 
   const handleAddCategory = useCallback((cat: Category) => {
     if (!IS_WEB) { try { dbCreateCategory(cat); } catch (e) { console.warn(e); } }
@@ -147,19 +155,20 @@ export default function App() {
     if (!IS_WEB) {
       const now = new Date().toISOString();
       for (const t of reordered) {
-        const original = tasks.find((o) => o.id === t.id);
+        const original = tasksRef.current.find((o) => o.id === t.id);
         if (original && (original.isoDate !== t.isoDate || original.sortOrder !== t.sortOrder)) {
           try { dbUpdateTask(t.id, { isoDate: t.isoDate, sortOrder: t.sortOrder, updatedAt: now }); } catch (e) { console.warn(e); }
         }
       }
     }
-  }, [tasks]);
+  }, [setTasks]);
 
   const catPickerTask = catPickerTaskId ? tasks.find((t) => t.id === catPickerTaskId) : null;
 
   return (
+    <SafeAreaProvider>
     <GestureHandlerRootView style={styles.gestureRoot}>
-      <SafeAreaView style={styles.root}>
+      <SafeAreaView style={styles.root} edges={['top', 'bottom']}>
         <StatusBar style="light" />
         <View style={styles.inner}>
           <Header
@@ -229,6 +238,7 @@ export default function App() {
         </View>
       </SafeAreaView>
     </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
 

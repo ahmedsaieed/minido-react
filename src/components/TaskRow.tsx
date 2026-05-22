@@ -18,6 +18,11 @@ interface Props {
   editText: string;
   isDragging?: boolean;
   onHandleMouseDown?: (e: any) => void;
+  // Native drag callbacks — wired from TaskList. The handle attaches a
+  // long-press-activated Pan that fires these three on JS thread.
+  onNativeDragStart?: () => void;
+  onNativeDragUpdate?: (absoluteY: number) => void;
+  onNativeDragEnd?: () => void;
   onToggle: () => void;
   onDelete: () => void;
   onMoveToToday: () => void;
@@ -41,6 +46,9 @@ export default function TaskRow({
   editText,
   isDragging,
   onHandleMouseDown,
+  onNativeDragStart,
+  onNativeDragUpdate,
+  onNativeDragEnd,
   onToggle,
   onDelete,
   onMoveToToday,
@@ -75,6 +83,22 @@ export default function TaskRow({
       }
     });
 
+  // Long-press the ⠿ handle to begin dragging. Once the long-press fires,
+  // pan tracks the finger's absolute Y so TaskList can find the drop zone.
+  // onFinalize runs on both end and cancel; commitDrop is a no-op if the
+  // gesture never actually activated.
+  const dragGesture = Gesture.Pan()
+    .activateAfterLongPress(280)
+    .onStart(() => {
+      if (onNativeDragStart) runOnJS(onNativeDragStart)();
+    })
+    .onUpdate((e) => {
+      if (onNativeDragUpdate) runOnJS(onNativeDragUpdate)(e.absoluteY);
+    })
+    .onFinalize(() => {
+      if (onNativeDragEnd) runOnJS(onNativeDragEnd)();
+    });
+
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: tx.value }],
   }));
@@ -93,12 +117,21 @@ export default function TaskRow({
       style={[styles.container, { opacity: rowOpacity }]}
     >
       {/*
-        ⠿ handle — the only draggable element on web.
-        Lives outside GestureDetector so HTML5 drag never conflicts with swipe.
+        ⠿ handle — drag source. On web: mousedown. On native: long-press
+        activates a Pan gesture (kept outside the swipe GestureDetector so
+        the two don't fight for the same finger).
       */}
-      <View style={styles.handle} {...(onHandleMouseDown ? { onMouseDown: onHandleMouseDown } as any : {})}>
-        <Text style={styles.handleIcon}>⠿</Text>
-      </View>
+      {onNativeDragStart ? (
+        <GestureDetector gesture={dragGesture}>
+          <View style={styles.handle}>
+            <Text style={styles.handleIcon}>⠿</Text>
+          </View>
+        </GestureDetector>
+      ) : (
+        <View style={styles.handle} {...(onHandleMouseDown ? { onMouseDown: onHandleMouseDown } as any : {})}>
+          <Text style={styles.handleIcon}>⠿</Text>
+        </View>
+      )}
 
       {/* Swipe gesture wraps only the task content, not the handle */}
       <GestureDetector gesture={panGesture}>
@@ -172,7 +205,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderLeftWidth: 2,
     borderLeftColor: 'transparent',
     borderRadius: 2,
@@ -182,18 +215,18 @@ const styles = StyleSheet.create({
     borderLeftColor: theme.accent,
   },
   handle: {
-    paddingHorizontal: 3,
+    paddingHorizontal: 4,
     paddingTop: 10,
     alignSelf: 'flex-start',
     cursor: 'grab' as any,
   },
-  handleIcon: { color: theme.border, fontSize: 12 },
+  handleIcon: { color: theme.cream3, fontSize: 18, lineHeight: 18, fontWeight: '700' },
   swipeRow: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 9,
-    paddingVertical: 8,
+    gap: 10,
+    paddingVertical: 9,
     paddingHorizontal: 4,
     borderRadius: 4,
     overflow: 'hidden',
@@ -215,10 +248,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingRight: 10,
   },
-  swipeLabel: { fontSize: 9, letterSpacing: 1.5, fontFamily: 'monospace' },
+  swipeLabel: { fontSize: 11, letterSpacing: 1.5, fontFamily: 'monospace' },
   checkbox: {
-    width: 15,
-    height: 15,
+    width: 18,
+    height: 18,
     borderWidth: 1,
     borderColor: theme.border,
     borderRadius: 2,
@@ -227,33 +260,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 2,
   },
-  checkmark: { fontSize: 8, lineHeight: 12 },
+  checkmark: { fontSize: 10, lineHeight: 14 },
   catBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
     borderRadius: 2,
     marginTop: 1,
     zIndex: 2,
   },
-  catCode: { fontFamily: 'monospace', fontSize: 9, letterSpacing: 1, fontWeight: '500' },
+  catCode: { fontFamily: 'monospace', fontSize: 11, letterSpacing: 1, fontWeight: '500' },
   textWrap: { flex: 1, zIndex: 2 },
-  taskText: { color: theme.cream2, fontFamily: 'monospace', fontSize: 12, lineHeight: 18 },
+  taskText: { color: theme.cream2, fontFamily: 'monospace', fontSize: 14, lineHeight: 22 },
   taskTextDone: { textDecorationLine: 'line-through', color: theme.cream3 },
   editInput: {
     flex: 1,
     color: theme.cream,
     fontFamily: 'monospace',
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 22,
     backgroundColor: theme.surfaceDeep,
     borderWidth: 1,
     borderColor: theme.border,
     borderRadius: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
     zIndex: 2,
   },
-  actionBtn: { paddingHorizontal: 3, zIndex: 2 },
-  actionIcon: { color: theme.cream3, fontSize: 12 },
-  deleteIcon: { color: theme.cream3, fontSize: 16, lineHeight: 20 },
+  actionBtn: { paddingHorizontal: 4, zIndex: 2 },
+  actionIcon: { color: theme.cream3, fontSize: 14 },
+  deleteIcon: { color: theme.cream3, fontSize: 20, lineHeight: 24 },
 });

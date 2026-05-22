@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { memo, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { Category } from '../types';
 
@@ -8,18 +8,25 @@ interface Props {
   defaultCat: string;
   categories: Category[];
   onCommit: (text: string, categoryCode: string) => void;
+  isActive: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
 }
 
-export default function ExpressEntry({ isoDate, defaultCat, categories, onCommit }: Props) {
+function ExpressEntry({
+  isoDate, defaultCat, categories, onCommit,
+  isActive, onActivate, onDeactivate,
+}: Props) {
   const [text, setText] = useState('');
   const [cat, setCat] = useState(defaultCat);
-  const [focused, setFocused] = useState(false);
   const [catPickerOpen, setCatPickerOpen] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const onCommitRef = useRef(onCommit);
+  useEffect(() => { onCommitRef.current = onCommit; }, [onCommit]);
 
   useEffect(() => {
-    if (!focused) setCat(defaultCat);
-  }, [defaultCat, focused]);
+    if (!isActive) setCat(defaultCat);
+  }, [defaultCat, isActive]);
 
   const getCat = (code: string) =>
     categories.find((c) => c.code === code) ?? { code, color: theme.cream3, title: code };
@@ -28,84 +35,128 @@ export default function ExpressEntry({ isoDate, defaultCat, categories, onCommit
 
   const commit = () => {
     if (!text.trim()) return;
-    onCommit(text.trim(), cat);
+    onCommitRef.current(text.trim(), cat);
     setText('');
     setTimeout(() => inputRef.current?.focus(), 20);
   };
 
-  const opacity = focused || text ? 1 : 0.32;
+  // Inactive placeholder — same horizontal layout as TaskRow so the square,
+  // category and text columns visually line up with real tasks above it.
+  if (!isActive) {
+    return (
+      <Pressable onPress={onActivate} style={[styles.container, { opacity: 0.32 }]}>
+        <View style={styles.handle} />
+        <View style={styles.inner}>
+          <View style={styles.dashedBox} />
+          <View style={[styles.catBadge, { backgroundColor: catObj.color + '1a' }]}>
+            <Text style={[styles.catCode, { color: catObj.color }]}>{catObj.code}</Text>
+          </View>
+          <Text style={[styles.taskText, styles.placeholderText]}>add task…</Text>
+        </View>
+      </Pressable>
+    );
+  }
 
   return (
-    <View style={[styles.row, { opacity }]}>
-      <View style={styles.handleSpacer} />
-      <View style={styles.dashedBox} />
+    <View style={styles.container}>
+      <View style={styles.handle} />
+      <View style={styles.inner}>
+        <View style={styles.dashedBox} />
 
-      {/* Category selector */}
-      <TouchableOpacity onPress={() => setCatPickerOpen(true)} style={styles.catBtn}>
-        <Text style={[styles.catText, { color: catObj.color }]}>{catObj.code}</Text>
-      </TouchableOpacity>
-
-      {/* Inline cat picker dropdown */}
-      {catPickerOpen && (
-        <View style={styles.catDropdown}>
-          {categories.map((c) => (
-            <TouchableOpacity
-              key={c.code}
-              style={styles.catOption}
-              onPress={() => { setCat(c.code); setCatPickerOpen(false); }}
-            >
-              <Text style={[styles.catOptionText, { color: c.color }]}>{c.code}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
-
-      <TextInput
-        ref={inputRef}
-        value={text}
-        onChangeText={setText}
-        onFocus={() => setFocused(true)}
-        onBlur={() => { setFocused(false); if (Platform.OS !== 'web') commit(); }}
-        onSubmitEditing={commit}
-        placeholder="add task…"
-        placeholderTextColor={theme.cream3}
-        style={styles.input}
-        returnKeyType="done"
-        blurOnSubmit={false}
-      />
-
-      {text.length > 0 && (
-        <TouchableOpacity onPress={commit} style={styles.submitBtn}>
-          <Text style={styles.submitText}>↵</Text>
+        <TouchableOpacity
+          onPress={() => setCatPickerOpen(true)}
+          style={[styles.catBadge, { backgroundColor: catObj.color + '1a' }]}
+        >
+          <Text style={[styles.catCode, { color: catObj.color }]}>{catObj.code}</Text>
         </TouchableOpacity>
-      )}
+
+        {catPickerOpen && (
+          <View style={styles.catDropdown}>
+            {categories.map((c) => (
+              <TouchableOpacity
+                key={c.code}
+                style={styles.catOption}
+                onPress={() => { setCat(c.code); setCatPickerOpen(false); }}
+              >
+                <Text style={[styles.catOptionText, { color: c.color }]}>{c.code}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        <TextInput
+          ref={inputRef}
+          value={text}
+          onChangeText={setText}
+          onBlur={onDeactivate}
+          onSubmitEditing={commit}
+          placeholder="add task…"
+          placeholderTextColor={theme.cream3}
+          style={styles.textInput}
+          returnKeyType="done"
+          blurOnSubmit={false}
+          autoFocus
+        />
+
+        {text.length > 0 && (
+          <TouchableOpacity onPress={commit} style={styles.submitBtn}>
+            <Text style={styles.submitText}>↵</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
 
+export default memo(ExpressEntry, (prev, next) =>
+  prev.isoDate === next.isoDate &&
+  prev.defaultCat === next.defaultCat &&
+  prev.categories === next.categories &&
+  prev.isActive === next.isActive
+);
+
+// Layout numbers below match TaskRow so columns line up visually:
+//   container.paddingVertical, handle width, inner paddings, gap,
+//   dashedBox size+marginTop (match checkbox), catBadge paddings+marginTop,
+//   font sizes — all kept in sync deliberately.
 const styles = StyleSheet.create({
-  row: {
+  container: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 5,
+    alignItems: 'flex-start',
+    paddingVertical: 3,
+  },
+  handle: {
+    width: 25,
+    alignSelf: 'flex-start',
+  },
+  inner: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 9,
     paddingHorizontal: 4,
   },
-  handleSpacer: { width: 20 },
   dashedBox: {
-    width: 15,
-    height: 15,
+    width: 18,
+    height: 18,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: theme.border,
     borderRadius: 2,
+    marginTop: 2,
   },
-  catBtn: { paddingVertical: 1 },
-  catText: { fontFamily: 'monospace', fontSize: 9, letterSpacing: 1, fontWeight: '500' },
+  catBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 2,
+    marginTop: 1,
+  },
+  catCode: { fontFamily: 'monospace', fontSize: 11, letterSpacing: 1, fontWeight: '500' },
   catDropdown: {
     position: 'absolute',
-    left: 44,
-    top: 24,
+    left: 48,
+    top: 32,
     backgroundColor: theme.surface,
     borderWidth: 1,
     borderColor: theme.border,
@@ -113,16 +164,18 @@ const styles = StyleSheet.create({
     zIndex: 50,
     elevation: 10,
   },
-  catOption: { paddingHorizontal: 10, paddingVertical: 6 },
-  catOptionText: { fontFamily: 'monospace', fontSize: 10, letterSpacing: 1 },
-  input: {
+  catOption: { paddingHorizontal: 11, paddingVertical: 7 },
+  catOptionText: { fontFamily: 'monospace', fontSize: 12, letterSpacing: 1 },
+  textInput: {
     flex: 1,
     color: theme.cream2,
     fontFamily: 'monospace',
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 22,
     padding: 0,
   },
-  submitBtn: { paddingHorizontal: 3 },
-  submitText: { color: theme.cream3, fontSize: 9, letterSpacing: 1 },
+  taskText: { flex: 1, color: theme.cream2, fontFamily: 'monospace', fontSize: 14, lineHeight: 22 },
+  placeholderText: { color: theme.cream3 },
+  submitBtn: { paddingHorizontal: 4 },
+  submitText: { color: theme.cream3, fontSize: 11, letterSpacing: 1 },
 });

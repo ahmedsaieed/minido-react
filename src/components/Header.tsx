@@ -18,7 +18,8 @@ export default function Header({ categories, filter, catFilter, totalDone, total
 
   return (
     <View style={styles.root}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+      {/* Row 1: Logo + progress + filter pills */}
+      <View style={styles.row}>
         <MinidoLogo />
 
         <View style={styles.divider} />
@@ -40,9 +41,14 @@ export default function Header({ categories, filter, catFilter, totalDone, total
             </Text>
           </TouchableOpacity>
         ))}
+      </View>
 
-        <View style={styles.divider} />
-
+      {/* Row 2: Category chips (horizontal scroll if needed) */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.catRow}
+      >
         {categories.map((cat) => {
           const active = catFilter === cat.code;
           return (
@@ -68,18 +74,25 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
     borderBottomWidth: 1,
     borderBottomColor: theme.borderSubtle,
-    paddingVertical: 14,
+    paddingVertical: 15,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    gap: 12,
+    paddingHorizontal: 20,
+    gap: 13,
     flexWrap: 'nowrap',
   },
-  divider: { width: 1, height: 14, backgroundColor: theme.border },
+  catRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 11,
+    gap: 9,
+  },
+  divider: { width: 1, height: 18, backgroundColor: theme.border },
   progressTrack: {
-    width: 36,
+    width: 44,
     height: 2,
     backgroundColor: theme.borderSubtle,
     borderRadius: 1,
@@ -93,9 +106,9 @@ const styles = StyleSheet.create({
   pill: {
     borderWidth: 1,
     borderColor: theme.borderSubtle,
-    borderRadius: 20,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
+    borderRadius: 24,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
   },
   pillActive: {
     borderColor: theme.accent,
@@ -104,25 +117,25 @@ const styles = StyleSheet.create({
   pillText: {
     color: theme.cream3,
     fontFamily: 'monospace',
-    fontSize: 9,
+    fontSize: 11,
     letterSpacing: 1.5,
   },
   pillTextActive: { color: theme.accent },
   catChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    gap: 6,
     borderWidth: 1,
     borderColor: theme.borderSubtle,
     borderRadius: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
-  catDot: { width: 5, height: 5, borderRadius: 3 },
+  catDot: { width: 7, height: 7, borderRadius: 4 },
   catChipText: {
     color: theme.cream3,
     fontFamily: 'monospace',
-    fontSize: 9,
+    fontSize: 11,
     letterSpacing: 1,
   },
 });
