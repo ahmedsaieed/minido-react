@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LayoutChangeEvent, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { Category, Task } from '../types';
 import ExpressEntry from './ExpressEntry';
@@ -100,6 +100,22 @@ export default function TaskList({
   // Pressables (no TextInput) so the keyboard / InputConnection doesn't get
   // shared/stolen between sibling text inputs.
   const [activeExpressDate, setActiveExpressDate] = useState<string | null>(null);
+
+  // Scroll Today into view when switching to DONE/ALL (where the list can
+  // start with past days). We position Today ~17% down from the top of the
+  // viewport so a bit of "yesterday" stays visible for context.
+  const scrollViewRef = useRef<ScrollView>(null);
+  const todayYRef = useRef(0);
+  const viewportHeightRef = useRef(0);
+
+  useEffect(() => {
+    if (filter !== 'done' && filter !== 'all') return;
+    const t = setTimeout(() => {
+      const target = Math.max(0, todayYRef.current - viewportHeightRef.current * 0.17);
+      scrollViewRef.current?.scrollTo({ y: target, animated: true });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [filter]);
 
   const isDraggingRef = useRef(false);
   const dragIdRef = useRef<string | null>(null);
@@ -267,18 +283,36 @@ export default function TaskList({
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <>
-      <ScrollView style={styles.root} contentContainerStyle={styles.content}>
+      <ScrollView
+        ref={scrollViewRef}
+        style={styles.root}
+        contentContainerStyle={styles.content}
+        onLayout={(e: LayoutChangeEvent) => {
+          viewportHeightRef.current = e.nativeEvent.layout.height;
+        }}
+      >
         {dates.map((iso) => {
           const dayTasks = visibleTasks(iso);
-          // TODO+ALL: show empty future days so you can add to them.
-          // DONE: only show days that actually have completed tasks.
-          if (dayTasks.length === 0 && filter === 'done') return null;
+          // DONE: hide every empty day.
+          // TODO: keep empty future days (for planning ahead) but drop empty
+          //       past days — yesterday with no leftovers is just clutter.
+          // ALL:  show everything.
+          if (dayTasks.length === 0) {
+            if (filter === 'done') return null;
+            if (filter === 'todo' && iso < today) return null;
+          }
           const isPast = iso < today;
           const isToday = iso === today;
           const labelColor = isPast ? theme.cream3 : isToday ? theme.cream : theme.accent;
 
           return (
-            <View key={iso} style={styles.dateSection}>
+            <View
+              key={iso}
+              style={styles.dateSection}
+              onLayout={isToday ? (e: LayoutChangeEvent) => {
+                todayYRef.current = e.nativeEvent.layout.y;
+              } : undefined}
+            >
               <View style={styles.dateHeader}>
                 <Text style={[styles.dateLabel, { color: labelColor }]}>
                   {isPast ? '↑ ' : ''}{formatDateLabel(iso)}{isToday ? ' · TODAY' : ''}
