@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LayoutChangeEvent, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Keyboard, LayoutChangeEvent, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { Category, Task } from '../types';
 import ExpressEntry from './ExpressEntry';
@@ -31,6 +31,25 @@ type DropLine = { iso: string; beforeTaskId: string | null } | null;
 // Defined outside TaskList so the component type is stable across re-renders.
 // If defined inside, every dropLine state change creates a new type → React
 // unmounts/remounts the nodes → mouseenter never re-fires → drop target freezes.
+// Wraps each ExpressEntry with a ref so TaskList can measureInWindow it
+// when the keyboard pops up, and scroll the row above the keyboard if it
+// would otherwise be covered.
+function ExpressMeasure({
+  iso, registerView, children,
+}: {
+  iso: string;
+  registerView?: (iso: string, view: View | null) => void;
+  children: any;
+}) {
+  const viewRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (!registerView) return;
+    registerView(iso, viewRef.current);
+    return () => registerView(iso, null);
+  }, [iso, registerView]);
+  return <View ref={viewRef}>{children}</View>;
+}
+
 function DropZone({
   iso, beforeTaskId, isActive, onHover, registerView,
 }: {
@@ -107,6 +126,7 @@ export default function TaskList({
   const scrollViewRef = useRef<ScrollView>(null);
   const todayYRef = useRef(0);
   const viewportHeightRef = useRef(0);
+  const scrollYRef = useRef(0);
 
   useEffect(() => {
     if (filter !== 'done' && filter !== 'all') return;
@@ -116,6 +136,48 @@ export default function TaskList({
     }, 120);
     return () => clearTimeout(t);
   }, [filter]);
+
+  // Track each ExpressEntry's wrapper view so we can measure its on-screen
+  // position when the keyboard appears.
+  const expressViewRefs = useRef<Map<string, View>>(new Map());
+  const registerExpressView = useCallback((iso: string, view: View | null) => {
+    if (view) expressViewRefs.current.set(iso, view);
+    else expressViewRefs.current.delete(iso);
+  }, []);
+
+  // Keyboard height tracker (mobile only).
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    if (IS_WEB) return;
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e) => setKeyboardHeight(e.endCoordinates.height));
+    const h = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
+
+  // When the keyboard opens AND an ExpressEntry is active, check whether it
+  // would be hidden by the keyboard. If yes, scroll just enough so its
+  // bottom sits ~24px above the keyboard. If already visible, leave alone.
+  useEffect(() => {
+    if (IS_WEB) return;
+    if (!activeExpressDate || keyboardHeight === 0) return;
+    const view = expressViewRefs.current.get(activeExpressDate);
+    if (!view) return;
+    const t = setTimeout(() => {
+      view.measureInWindow((_x, y, _w, h) => {
+        const screenH = Dimensions.get('window').height;
+        const visibleH = screenH - keyboardHeight;
+        const bottom = y + h;
+        const margin = 24;
+        if (bottom + margin > visibleH) {
+          const delta = bottom + margin - visibleH;
+          scrollViewRef.current?.scrollTo({ y: scrollYRef.current + delta, animated: true });
+        }
+      });
+    }, 80);
+    return () => clearTimeout(t);
+  }, [activeExpressDate, keyboardHeight]);
 
   const isDraggingRef = useRef(false);
   const dragIdRef = useRef<string | null>(null);
@@ -290,6 +352,8 @@ export default function TaskList({
         onLayout={(e: LayoutChangeEvent) => {
           viewportHeightRef.current = e.nativeEvent.layout.height;
         }}
+        onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+        scrollEventThrottle={32}
       >
         {dates.map((iso) => {
           const dayTasks = visibleTasks(iso);
@@ -382,15 +446,17 @@ export default function TaskList({
               })}
 
               {!catFilter && (
-                <ExpressEntry
-                  isoDate={iso}
-                  defaultCat={defaultExpressCat(iso)}
-                  categories={categories}
-                  onCommit={(text, cat) => onExpressCommit(iso, text, cat)}
-                  isActive={activeExpressDate === iso}
-                  onActivate={() => setActiveExpressDate(iso)}
-                  onDeactivate={() => setActiveExpressDate(null)}
-                />
+                <ExpressMeasure iso={iso} registerView={IS_WEB ? undefined : registerExpressView}>
+                  <ExpressEntry
+                    isoDate={iso}
+                    defaultCat={defaultExpressCat(iso)}
+                    categories={categories}
+                    onCommit={(text, cat) => onExpressCommit(iso, text, cat)}
+                    isActive={activeExpressDate === iso}
+                    onActivate={() => setActiveExpressDate(iso)}
+                    onDeactivate={() => setActiveExpressDate(null)}
+                  />
+                </ExpressMeasure>
               )}
             </View>
           );
