@@ -42,12 +42,6 @@ export default function Header({ categories, filter, catFilter, totalDone, total
             </Text>
           </TouchableOpacity>
         ))}
-
-        <View style={styles.flexSpacer} />
-
-        <TouchableOpacity onPress={onOpenSettings} style={styles.gearBtn} accessibilityLabel="Settings">
-          <Text style={styles.gearIcon}>⚙</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Row 2: Category chips (horizontal scroll if needed) */}
@@ -72,6 +66,12 @@ export default function Header({ categories, filter, catFilter, totalDone, total
           );
         })}
       </ScrollView>
+
+      {/* Gear sits in the top-right corner so it doesn't fight for space
+          with the logo / progress / filter pills on narrow screens. */}
+      <TouchableOpacity onPress={onOpenSettings} style={styles.gearBtn} accessibilityLabel="Settings">
+        <Text style={styles.gearIcon}>⚙</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -145,7 +145,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1,
   },
-  flexSpacer: { flex: 1 },
-  gearBtn: { paddingHorizontal: 6, paddingVertical: 2 },
-  gearIcon: { color: theme.cream3, fontSize: 18 },
+  gearBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: theme.bg,
+  },
+  gearIcon: { color: theme.cream3, fontSize: 20 },
 });
