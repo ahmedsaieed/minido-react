@@ -137,22 +137,36 @@ function setSyncError(msg: string): void {
 
 // ── the engine ────────────────────────────────────────────────────────────────
 
+// Normalize whatever JSON happens to be in Drive into a proper AppData.
+// Old/foreign files (e.g. the Phase 3 TEST DRIVE probe) might be missing
+// tasks/categories entirely; treat them as empty so the next sync simply
+// overwrites them with the real schema.
+function normalizeAppData(raw: any): AppData {
+  return {
+    version: typeof raw?.version === 'number' ? raw.version : 0,
+    lastModified: typeof raw?.lastModified === 'string' ? raw.lastModified : '',
+    tasks: Array.isArray(raw?.tasks) ? raw.tasks : [],
+    categories: Array.isArray(raw?.categories) ? raw.categories : [],
+  };
+}
+
 async function fetchRemote(): Promise<{ file: DriveFile | null; data: AppData | null }> {
   const cachedId = getCachedFileId();
   if (cachedId) {
     try {
-      const data = await downloadJson<AppData>(cachedId);
-      // We don't fetch metadata here — we'll get the updated file resource
-      // back on the next upload.
-      return { file: { id: cachedId, name: 'minido-sync.json', modifiedTime: '' }, data };
+      const raw = await downloadJson<unknown>(cachedId);
+      return {
+        file: { id: cachedId, name: 'minido-sync.json', modifiedTime: '' },
+        data: normalizeAppData(raw),
+      };
     } catch {
       // Probably deleted on Drive; fall through to lookup.
     }
   }
   const file = await findSyncFile();
   if (!file) return { file: null, data: null };
-  const data = await downloadJson<AppData>(file.id);
-  return { file, data };
+  const raw = await downloadJson<unknown>(file.id);
+  return { file, data: normalizeAppData(raw) };
 }
 
 export async function sync(): Promise<SyncResult> {
