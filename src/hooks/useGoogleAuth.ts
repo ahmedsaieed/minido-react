@@ -10,7 +10,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import * as AuthSession from 'expo-auth-session';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import {
@@ -78,14 +77,20 @@ export function useGoogleAuth(): UseGoogleAuth {
   }, []);
 
   // When the OAuth round-trip returns, exchange the auth code for tokens.
+  // Doing the POST by hand (rather than AuthSession.exchangeCodeAsync) so we
+  // can log the exact request/response and surface Google's error body
+  // verbatim if anything goes wrong.
   useEffect(() => {
     (async () => {
       if (!response || !request) return;
+      console.log('[auth] response.type=', response.type, 'redirectUri=', request.redirectUri);
       if (response.type !== 'success') {
         if (response.type === 'error') setError(response.error?.message ?? 'Sign-in failed');
         return;
       }
       const code = response.params?.code;
+      const codeVerifier = (request as any).codeVerifier as string | undefined;
+      console.log('[auth] code present?', !!code, 'codeVerifier present?', !!codeVerifier);
       if (!code) {
         setError('No authorization code returned');
         return;
@@ -97,33 +102,50 @@ export function useGoogleAuth(): UseGoogleAuth {
       }
 
       try {
-        const result = await AuthSession.exchangeCodeAsync(
-          {
-            clientId,
-            code,
-            redirectUri: request.redirectUri,
-            extraParams: request.codeVerifier ? { code_verifier: request.codeVerifier } : undefined,
-          },
-          { tokenEndpoint: TOKEN_ENDPOINT },
-        );
-
-        const accessToken = result.accessToken;
-        const refreshToken = result.refreshToken ?? null;
-        const expiresAt = Date.now() + (result.expiresIn ?? 3600) * 1000;
-        const scope = result.scope ?? SCOPES.join(' ');
+        const body = new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: clientId,
+          redirect_uri: request.redirectUri,
+          ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
+        });
+        console.log('[auth] exchanging:', body.toString());
+        const tokenRes = await fetch(TOKEN_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+        });
+        const tokenText = await tokenRes.text();
+        console.log('[auth] token endpoint', tokenRes.status, tokenText);
+        if (!tokenRes.ok) {
+          throw new Error(`Token exchange ${tokenRes.status}: ${tokenText}`);
+        }
+        const json = JSON.parse(tokenText) as {
+          access_token: string;
+          refresh_token?: string;
+          expires_in: number;
+          scope?: string;
+        };
 
         let user: GoogleUser | undefined;
         try {
-          user = await fetchUserInfo(accessToken);
+          user = await fetchUserInfo(json.access_token);
         } catch (e) {
-          console.warn('[useGoogleAuth] userinfo failed', e);
+          console.warn('[auth] userinfo failed', e);
         }
 
-        const next: Tokens = { accessToken, refreshToken, expiresAt, scope, user };
+        const next: Tokens = {
+          accessToken: json.access_token,
+          refreshToken: json.refresh_token ?? null,
+          expiresAt: Date.now() + json.expires_in * 1000,
+          scope: json.scope ?? SCOPES.join(' '),
+          user,
+        };
         await saveTokens(next);
         setTokens(next);
         setError(null);
       } catch (e: any) {
+        console.warn('[auth] exchange failed', e);
         setError(e?.message ?? String(e));
       }
     })();
