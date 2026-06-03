@@ -1,15 +1,20 @@
 // In-memory SQLite mock using a simple row store.
 // Supports the synchronous API used by db.ts:
 //   openDatabaseSync, execSync, runSync, getAllSync, getFirstSync
+// Now also: ALTER TABLE ADD COLUMN (idempotent throw-on-duplicate), and
+// WHERE clauses with `IS NULL`, `IS NOT NULL`, and `AND`.
 
 interface Row {
   [key: string]: unknown;
 }
 
 let tables: Record<string, Row[]> = {};
+// Per-table set of added columns, to mimic SQLite's "duplicate column" error.
+let addedColumns: Record<string, Set<string>> = {};
 
 function reset() {
   tables = {};
+  addedColumns = {};
 }
 
 function parseCreateTable(sql: string): string[] {
@@ -30,6 +35,37 @@ function bindParams(sql: string, params: unknown[]): string {
   });
 }
 
+// Coerce a SQL literal token (e.g. "'hello''world'", "42", "NULL") to a JS value.
+function literalToJs(raw: string): unknown {
+  const v = raw.trim();
+  if (v === 'NULL') return null;
+  if (v.startsWith("'")) return v.slice(1, -1).replace(/''/g, "'");
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  return v;
+}
+
+// Evaluate a single WHERE atom against a row. Supports `col = val`,
+// `col IS NULL`, `col IS NOT NULL`.
+function evalCondition(cond: string, row: Row): boolean {
+  const c = cond.trim();
+  const isNotNull = c.match(/^(\w+)\s+IS\s+NOT\s+NULL$/i);
+  if (isNotNull) return row[isNotNull[1]] !== null && row[isNotNull[1]] !== undefined;
+  const isNull = c.match(/^(\w+)\s+IS\s+NULL$/i);
+  if (isNull) {
+    const v = row[isNull[1]];
+    return v === null || v === undefined;
+  }
+  const eq = c.match(/^(\w+)\s*=\s*(.+)$/);
+  if (eq) return row[eq[1]] === literalToJs(eq[2]);
+  return true;
+}
+
+function matchesWhere(whereStr: string | undefined, row: Row): boolean {
+  if (!whereStr) return true;
+  const atoms = whereStr.split(/\s+AND\s+/i);
+  return atoms.every((a) => evalCondition(a, row));
+}
+
 function execSql(sql: string, params: unknown[] = []): Row[] {
   const bound = bindParams(sql.trim(), params);
 
@@ -38,7 +74,26 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
     const names = parseCreateTable(bound);
     for (const name of names) {
       if (!tables[name]) tables[name] = [];
+      if (!addedColumns[name]) addedColumns[name] = new Set();
     }
+    return [];
+  }
+
+  // ALTER TABLE ADD COLUMN
+  const alterMatch = bound.match(/^ALTER TABLE (\w+)\s+ADD COLUMN\s+(\w+)\b(.*)$/i);
+  if (alterMatch) {
+    const [, tbl, col, rest] = alterMatch;
+    if (!tables[tbl]) tables[tbl] = [];
+    if (!addedColumns[tbl]) addedColumns[tbl] = new Set();
+    if (addedColumns[tbl].has(col)) {
+      const err: any = new Error(`duplicate column name: ${col}`);
+      throw err;
+    }
+    addedColumns[tbl].add(col);
+    // Apply default for existing rows.
+    const defMatch = rest.match(/DEFAULT\s+(.+?)\s*;?$/i);
+    const defVal = defMatch ? literalToJs(defMatch[1]) : null;
+    tables[tbl] = tables[tbl].map((r) => (col in r ? r : { ...r, [col]: defVal }));
     return [];
   }
 
@@ -48,13 +103,9 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
     if (!m) return [];
     const [, tbl, colStr, valStr] = m;
     const cols = colStr.split(',').map((c) => c.trim());
-    const vals = valStr.match(/'[^']*'|\d+|NULL/g) || [];
+    const vals = valStr.match(/'(?:[^']|'')*'|-?\d+(?:\.\d+)?|NULL/g) || [];
     const row: Row = {};
-    cols.forEach((c, idx) => {
-      let v: unknown = vals[idx];
-      if (typeof v === 'string' && v.startsWith("'")) v = v.slice(1, -1).replace(/''/g, "'");
-      row[c] = v;
-    });
+    cols.forEach((c, idx) => { row[c] = literalToJs(vals[idx]); });
     if (!tables[tbl]) tables[tbl] = [];
     const pk = cols[0];
     const exists = tables[tbl].some((r) => r[pk] === row[pk]);
@@ -70,14 +121,7 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
     const cols = colStr.split(',').map((c) => c.trim());
     const vals = valStr.match(/'(?:[^']|'')*'|-?\d+(?:\.\d+)?|NULL/g) || [];
     const row: Row = {};
-    cols.forEach((c, idx) => {
-      let v: unknown = vals[idx];
-      if (typeof v === 'string' && v.startsWith("'"))
-        v = v.slice(1, -1).replace(/''/g, "'");
-      else if (typeof v === 'string' && v !== 'NULL') v = Number(v);
-      else if (v === 'NULL') v = null;
-      row[c] = v;
-    });
+    cols.forEach((c, idx) => { row[c] = literalToJs(vals[idx]); });
     if (!tables[tbl]) tables[tbl] = [];
     tables[tbl].push(row);
     return [];
@@ -85,23 +129,17 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
 
   // UPDATE
   if (/^UPDATE/i.test(bound)) {
-    const tblMatch = bound.match(/UPDATE (\w+) SET (.+) WHERE (.+)/i);
+    const tblMatch = bound.match(/^UPDATE (\w+)\s+SET\s+(.+?)\s+WHERE\s+(.+)$/i);
     if (!tblMatch) return [];
     const [, tbl, setStr, whereStr] = tblMatch;
     const changes: Row = {};
     setStr.split(',').forEach((pair) => {
       const [k, v] = pair.split('=').map((s) => s.trim());
-      let val: unknown = v;
-      if (typeof val === 'string' && val.startsWith("'"))
-        val = val.slice(1, -1).replace(/''/g, "'");
-      else if (typeof val === 'string' && val !== 'NULL') val = isNaN(Number(val)) ? val : Number(val);
-      changes[k] = val;
+      changes[k] = literalToJs(v);
     });
-    const [wk, wv] = whereStr.split('=').map((s) => s.trim());
-    const wVal = wv.startsWith("'") ? wv.slice(1, -1) : Number(wv);
     if (tables[tbl]) {
       tables[tbl] = tables[tbl].map((r) =>
-        r[wk] === wVal ? { ...r, ...changes } : r
+        matchesWhere(whereStr, r) ? { ...r, ...changes } : r
       );
     }
     return [];
@@ -112,9 +150,7 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
     const m = bound.match(/FROM (\w+)\s+WHERE (.+)/i);
     if (!m) return [];
     const [, tbl, whereStr] = m;
-    const [wk, wv] = whereStr.split('=').map((s) => s.trim());
-    const wVal = wv.startsWith("'") ? wv.slice(1, -1) : Number(wv);
-    if (tables[tbl]) tables[tbl] = tables[tbl].filter((r) => r[wk] !== wVal);
+    if (tables[tbl]) tables[tbl] = tables[tbl].filter((r) => !matchesWhere(whereStr, r));
     return [];
   }
 
@@ -126,13 +162,8 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
     if (!tables[tbl]) return [];
     let rows = [...tables[tbl]];
 
-    const whereMatch = bound.match(/WHERE (.+?)(?:\s+ORDER|\s+LIMIT|$)/i);
-    if (whereMatch) {
-      const cond = whereMatch[1];
-      const [wk, wv] = cond.split('=').map((s) => s.trim());
-      const wVal = wv.startsWith("'") ? wv.slice(1, -1) : Number(wv);
-      rows = rows.filter((r) => r[wk] === wVal);
-    }
+    const whereMatch = bound.match(/WHERE\s+(.+?)(?:\s+ORDER|\s+LIMIT|$)/i);
+    if (whereMatch) rows = rows.filter((r) => matchesWhere(whereMatch[1], r));
 
     const orderMatch = bound.match(/ORDER BY (.+?)(?:\s+LIMIT|$)/i);
     if (orderMatch) {
@@ -148,7 +179,7 @@ function execSql(sql: string, params: unknown[] = []): Row[] {
       });
     }
 
-    // convert done back to boolean for Task rows
+    // Re-hydrate done back to a boolean for Task rows.
     return rows.map((r) => ({
       ...r,
       ...(r.done !== undefined ? { done: r.done === 1 || r.done === true } : {}),

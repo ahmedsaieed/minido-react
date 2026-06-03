@@ -11,6 +11,8 @@ import {
   seedDefaults,
   getCategories as dbGetCategories,
   getTasks as dbGetTasks,
+  getTaskTombstones as dbGetTaskTombstones,
+  getCategoryTombstones as dbGetCategoryTombstones,
   createTask as dbCreateTask,
   updateTask as dbUpdateTask,
   deleteTask as dbDeleteTask,
@@ -44,7 +46,7 @@ export default function App() {
 
   const {
     tasks, categories,
-    setTasks, setCategories,
+    setTasks, setCategories, setTombstones,
     addTask, updateTask, deleteTask,
     toggleDone, moveTask, changeCategory, addCategory,
   } = useTaskStore();
@@ -82,6 +84,10 @@ export default function App() {
       seedDefaults();
       setCategories(dbGetCategories());
       setTasks(dbGetTasks());
+      setTombstones({
+        tasks: dbGetTaskTombstones(),
+        categories: dbGetCategoryTombstones(),
+      });
     } catch (e) {
       console.warn('DB init failed, falling back to in-memory store', e);
       setCategories(DEFAULT_CATEGORIES);
@@ -151,10 +157,19 @@ export default function App() {
   }, []);
 
   const handleReorder = useCallback((reordered: Task[]) => {
-    setTasks(reordered);
+    const now = new Date().toISOString();
+    // Bump updatedAt on any row whose position/day actually changed so sync
+    // picks the reorder up as a real edit.
+    const bumped = reordered.map((t) => {
+      const original = tasksRef.current.find((o) => o.id === t.id);
+      if (original && (original.isoDate !== t.isoDate || original.sortOrder !== t.sortOrder)) {
+        return { ...t, updatedAt: now };
+      }
+      return t;
+    });
+    setTasks(bumped);
     if (!IS_WEB) {
-      const now = new Date().toISOString();
-      for (const t of reordered) {
+      for (const t of bumped) {
         const original = tasksRef.current.find((o) => o.id === t.id);
         if (original && (original.isoDate !== t.isoDate || original.sortOrder !== t.sortOrder)) {
           try { dbUpdateTask(t.id, { isoDate: t.isoDate, sortOrder: t.sortOrder, updatedAt: now }); } catch (e) { console.warn(e); }

@@ -17,8 +17,16 @@ function makeTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
+function makeCat(over: Partial<Category> & Pick<Category, 'code'>): Category {
+  return { color: '#000', title: over.code, updatedAt: '1970-01-01T00:00:00.000Z', ...over };
+}
+
 beforeEach(() => {
-  useTaskStore.setState({ tasks: [], categories: [] });
+  useTaskStore.setState({
+    tasks: [],
+    categories: [],
+    tombstones: { tasks: [], categories: [] },
+  });
 });
 
 // ── addTask ───────────────────────────────────────────────────────────────────
@@ -87,11 +95,21 @@ test('deleteTask removes task from store', () => {
   expect(result.current.tasks[0].id).toBe('keep');
 });
 
+test('deleteTask moves task into tombstones with deletedAt set', () => {
+  const { result } = renderHook(() => useTaskStore());
+  const t = makeTask({ id: 'gone' });
+  act(() => { result.current.addTask(t); });
+  act(() => { result.current.deleteTask('gone'); });
+  expect(result.current.tombstones.tasks).toHaveLength(1);
+  expect(result.current.tombstones.tasks[0].id).toBe('gone');
+  expect(result.current.tombstones.tasks[0].deletedAt).toBeTruthy();
+});
+
 // ── addCategory ───────────────────────────────────────────────────────────────
 
 test('addCategory makes category available in store', () => {
   const { result } = renderHook(() => useTaskStore());
-  const cat: Category = { code: 'FIT', color: '#aabbcc', title: 'Fitness' };
+  const cat: Category = makeCat({ code: 'FIT', color: '#aabbcc', title: 'Fitness' });
   act(() => { result.current.addCategory(cat); });
   expect(result.current.categories).toHaveLength(1);
   expect(result.current.categories[0].code).toBe('FIT');
@@ -99,11 +117,21 @@ test('addCategory makes category available in store', () => {
 
 // ── deleteCategory ────────────────────────────────────────────────────────────
 
+test('deleteCategory moves it to tombstones', () => {
+  const { result } = renderHook(() => useTaskStore());
+  const cat = makeCat({ code: 'GONE', color: '#000', title: 'Gone' });
+  act(() => { result.current.addCategory(cat); });
+  act(() => { result.current.deleteCategory('GONE'); });
+  expect(result.current.categories.find((c) => c.code === 'GONE')).toBeUndefined();
+  expect(result.current.tombstones.categories[0]?.code).toBe('GONE');
+  expect(result.current.tombstones.categories[0]?.deletedAt).toBeTruthy();
+});
+
 test('deleteCategory removes only the targeted category', () => {
   const { result } = renderHook(() => useTaskStore());
   const cats: Category[] = [
-    { code: 'AAA', color: '#111', title: 'A' },
-    { code: 'BBB', color: '#222', title: 'B' },
+    makeCat({ code: 'AAA', color: '#111', title: 'A' }),
+    makeCat({ code: 'BBB', color: '#222', title: 'B' }),
   ];
   act(() => { cats.forEach((c) => result.current.addCategory(c)); });
   act(() => { result.current.deleteCategory('AAA'); });
@@ -124,8 +152,8 @@ test('setTasks replaces the task list wholesale', () => {
 test('setCategories replaces the category list wholesale', () => {
   const { result } = renderHook(() => useTaskStore());
   const cats: Category[] = [
-    { code: 'X', color: '#x', title: 'X' },
-    { code: 'Y', color: '#y', title: 'Y' },
+    makeCat({ code: 'X', color: '#x', title: 'X' }),
+    makeCat({ code: 'Y', color: '#y', title: 'Y' }),
   ];
   act(() => { result.current.setCategories(cats); });
   expect(result.current.categories).toHaveLength(2);

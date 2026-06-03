@@ -123,3 +123,70 @@ test('db.seedDefaults is idempotent — running twice does not duplicate', () =>
     DEFAULT_CATEGORIES.every((d) => codes.includes(d.code))
   ).toBe(true);
 });
+
+// ── soft-delete + tombstones ──────────────────────────────────────────────────
+
+test('db.deleteTask soft-deletes — row stays as a tombstone', () => {
+  const db = loadDb();
+  db.initDb();
+  const t = makeTask({ id: 'gone' });
+  db.createTask(t);
+  db.deleteTask('gone');
+  expect(db.getTasks()).toHaveLength(0);
+  const tombs = db.getTaskTombstones();
+  expect(tombs).toHaveLength(1);
+  expect(tombs[0].id).toBe('gone');
+  expect(tombs[0].deletedAt).toBeTruthy();
+});
+
+test('db.deleteCategory soft-deletes — row stays as a tombstone', () => {
+  const db = loadDb();
+  db.initDb();
+  db.createCategory({ code: 'TMP', color: '#999', title: 'Temp', updatedAt: '2026-06-01T00:00:00.000Z' });
+  db.deleteCategory('TMP');
+  expect(db.getCategories().find((c: { code: string }) => c.code === 'TMP')).toBeUndefined();
+  const tombs = db.getCategoryTombstones();
+  expect(tombs.find((c: { code: string }) => c.code === 'TMP')?.deletedAt).toBeTruthy();
+});
+
+test('db.createCategory revives a previously-deleted code', () => {
+  const db = loadDb();
+  db.initDb();
+  db.createCategory({ code: 'REV', color: '#aaa', title: 'Old', updatedAt: '2026-06-01T00:00:00.000Z' });
+  db.deleteCategory('REV');
+  // recreating with the same code should now succeed and clear the tombstone
+  expect(() =>
+    db.createCategory({ code: 'REV', color: '#bbb', title: 'New', updatedAt: '2026-06-02T00:00:00.000Z' })
+  ).not.toThrow();
+  const cats = db.getCategories();
+  const found = cats.find((c: { code: string; title: string }) => c.code === 'REV');
+  expect(found?.title).toBe('New');
+  expect(db.getCategoryTombstones().find((c: { code: string }) => c.code === 'REV')).toBeUndefined();
+});
+
+// ── sync_state ────────────────────────────────────────────────────────────────
+
+test('db.getSyncState returns an empty record initially', () => {
+  const db = loadDb();
+  db.initDb();
+  const s = db.getSyncState();
+  expect(s.remoteFileId).toBeNull();
+  expect(s.remoteRevision).toBeNull();
+  expect(s.lastSyncedAt).toBeNull();
+});
+
+test('db.setSyncState round-trips values', () => {
+  const db = loadDb();
+  db.initDb();
+  db.setSyncState({ remoteFileId: 'abc', remoteRevision: '7', lastSyncedAt: '2026-06-03T10:00:00.000Z' });
+  const s = db.getSyncState();
+  expect(s.remoteFileId).toBe('abc');
+  expect(s.remoteRevision).toBe('7');
+  expect(s.lastSyncedAt).toBe('2026-06-03T10:00:00.000Z');
+});
+
+test('db.initDb is idempotent — calling twice does not throw', () => {
+  const db = loadDb();
+  db.initDb();
+  expect(() => db.initDb()).not.toThrow();
+});

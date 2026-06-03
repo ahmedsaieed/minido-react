@@ -38,7 +38,7 @@ export default function CategoryModal({ visible, existingCodes, onClose, onCreat
     if (c.length < 1 || c.length > 3) { setError('Code must be 1–3 characters'); return; }
     if (existingCodes.includes(c)) { setError('Code already exists'); return; }
     if (!title.trim()) { setError('Title is required'); return; }
-    onCreate({ code: c, color, title: title.trim() });
+    onCreate({ code: c, color, title: title.trim(), updatedAt: new Date().toISOString() });
     reset();
     onClose();
   };

@@ -313,7 +313,7 @@ export default function TaskList({
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const getCat = (code: string): Category =>
-    categories.find((c) => c.code === code) ?? { code, color: theme.cream3, title: code };
+    categories.find((c) => c.code === code) ?? { code, color: theme.cream3, title: code, updatedAt: '1970-01-01T00:00:00.000Z' };
 
   const dates = (() => {
     const set = new Set(tasks.map((t) => t.isoDate));
