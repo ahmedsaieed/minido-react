@@ -324,12 +324,17 @@ export default function TaskList({
   })();
 
   const visibleTasks = (iso: string) =>
-    tasks.filter(
-      (t) =>
-        t.isoDate === iso &&
-        (filter === 'all' ? true : filter === 'done' ? t.done : !t.done) &&
-        (catFilter ? t.categoryCode === catFilter : true)
-    );
+    tasks
+      .filter(
+        (t) =>
+          t.isoDate === iso &&
+          (filter === 'all' ? true : filter === 'done' ? t.done : !t.done) &&
+          (catFilter ? t.categoryCode === catFilter : true),
+      )
+      // Sort by sortOrder explicitly. Array order is unreliable after a sync
+      // pulls in remote rows — the merge keeps each row's local insertion
+      // position even though its sortOrder may have changed remotely.
+      .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const defaultExpressCat = (iso: string) => {
     const day = tasks.filter((t) => t.isoDate === iso);
