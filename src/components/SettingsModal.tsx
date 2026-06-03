@@ -1,14 +1,57 @@
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { useGoogleAuth } from '../hooks/useGoogleAuth';
+import { createSyncFile, downloadJson, findSyncFile, listAppData, updateSyncFile } from '../services/drive';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
+interface DriveTestResult {
+  ok: boolean;
+  log: string[];
+}
+
 export default function SettingsModal({ visible, onClose }: Props) {
   const { ready, isSignedIn, user, signIn, signOut, error } = useGoogleAuth();
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<DriveTestResult | null>(null);
+
+  const runDriveTest = async () => {
+    setTesting(true);
+    const log: string[] = [];
+    const t0 = Date.now();
+    const push = (s: string) => { log.push(`${((Date.now() - t0) / 1000).toFixed(2)}s  ${s}`); };
+    try {
+      push('list appDataFolder…');
+      const before = await listAppData();
+      push(`  found ${before.length} file(s)`);
+
+      const probe = { test: true, at: new Date().toISOString(), nonce: Math.random().toString(36).slice(2) };
+      let file = await findSyncFile();
+      if (file) {
+        push(`update existing file (${file.id})…`);
+        file = await updateSyncFile(file.id, probe);
+      } else {
+        push('create sync file…');
+        file = await createSyncFile(probe);
+      }
+      push(`  id=${file.id} version=${file.version ?? '?'}`);
+
+      push('download…');
+      const fetched = await downloadJson<typeof probe>(file.id);
+      push(`  nonce matches? ${fetched.nonce === probe.nonce ? 'yes' : 'NO!'}`);
+
+      setTestResult({ ok: true, log });
+    } catch (e: any) {
+      log.push(`ERROR: ${e?.message ?? String(e)}`);
+      setTestResult({ ok: false, log });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
@@ -31,9 +74,14 @@ export default function SettingsModal({ visible, onClose }: Props) {
                 {user?.email ?? 'Signed in'}
               </Text>
               {!!user?.name && <Text style={styles.userSub} numberOfLines={1}>{user.name}</Text>}
-              <TouchableOpacity onPress={signOut} style={styles.btnGhost}>
-                <Text style={styles.btnGhostText}>SIGN OUT</Text>
-              </TouchableOpacity>
+              <View style={styles.btnRow}>
+                <TouchableOpacity onPress={runDriveTest} disabled={testing} style={styles.btnPrimary}>
+                  <Text style={styles.btnPrimaryText}>{testing ? 'TESTING…' : 'TEST DRIVE'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={signOut} style={styles.btnGhost}>
+                  <Text style={styles.btnGhostText}>SIGN OUT</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           ) : (
             <View>
@@ -44,6 +92,16 @@ export default function SettingsModal({ visible, onClose }: Props) {
               <TouchableOpacity onPress={signIn} style={styles.btnPrimary}>
                 <Text style={styles.btnPrimaryText}>SIGN IN WITH GOOGLE</Text>
               </TouchableOpacity>
+            </View>
+          )}
+
+          {!!testResult && (
+            <View style={[styles.testBox, !testResult.ok && styles.testBoxErr]}>
+              <ScrollView style={{ maxHeight: 180 }}>
+                {testResult.log.map((line, i) => (
+                  <Text key={i} style={styles.testLine}>{line}</Text>
+                ))}
+              </ScrollView>
             </View>
           )}
 
@@ -85,6 +143,7 @@ const styles = StyleSheet.create({
   userLine: { color: theme.cream, fontFamily: 'monospace', fontSize: 14, marginBottom: 2 },
   userSub: { color: theme.cream3, fontFamily: 'monospace', fontSize: 12, marginBottom: 14 },
   help: { color: theme.cream2, fontFamily: 'monospace', fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  btnRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   btnPrimary: {
     backgroundColor: theme.accent,
     borderRadius: 4,
@@ -102,5 +161,15 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   btnGhostText: { color: theme.cream3, fontFamily: 'monospace', fontSize: 12, letterSpacing: 2 },
+  testBox: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 4,
+    backgroundColor: theme.surfaceDeep,
+    padding: 10,
+  },
+  testBoxErr: { borderColor: '#d48a8a' },
+  testLine: { color: theme.cream2, fontFamily: 'monospace', fontSize: 11, lineHeight: 15 },
   error: { color: '#d48a8a', fontFamily: 'monospace', fontSize: 11, marginTop: 14, lineHeight: 16 },
 });
