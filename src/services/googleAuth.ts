@@ -104,11 +104,18 @@ export async function refreshAccessToken(refreshToken: string): Promise<{ access
   const clientId = clientIdForCurrentPlatform();
   if (!clientId) throw new Error('No Google client_id configured for this platform');
 
-  const body = new URLSearchParams({
+  const params: Record<string, string> = {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     client_id: clientId,
-  });
+  };
+  // Web client requires the secret on refresh too. Android (installed) client
+  // does not. process.env.EXPO_PUBLIC_* is statically inlined at build time
+  // so this is safe to reference on both platforms.
+  if (Platform.OS === 'web' && process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_SECRET) {
+    params.client_secret = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_SECRET;
+  }
+  const body = new URLSearchParams(params);
 
   const res = await fetch(TOKEN_ENDPOINT, {
     method: 'POST',

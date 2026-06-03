@@ -55,10 +55,18 @@ export function useGoogleAuth(): UseGoogleAuth {
 
   const config = getGoogleAuthConfig();
 
+  // Google's "Web application" client requires a client_secret on the token
+  // exchange even when using PKCE — Android "Installed" clients don't.
+  // The secret comes from an env var so it isn't committed.
+  const webClientSecret = Platform.OS === 'web'
+    ? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_SECRET
+    : undefined;
+
   const [request, response, promptAsync] = Google.useAuthRequest({
     androidClientId: config.androidClientId,
     iosClientId: config.iosClientId,
     webClientId: config.webClientId,
+    clientSecret: webClientSecret,
     scopes: SCOPES,
     responseType: 'code',
     // EXTRA_PARAMS is module-level so its identity is stable; see comment
