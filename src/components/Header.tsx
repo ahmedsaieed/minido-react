@@ -11,9 +11,10 @@ interface Props {
   total: number;
   onFilterChange: (f: 'all' | 'todo' | 'done') => void;
   onCatFilterChange: (code: string | null) => void;
+  onOpenSettings: () => void;
 }
 
-export default function Header({ categories, filter, catFilter, totalDone, total, onFilterChange, onCatFilterChange }: Props) {
+export default function Header({ categories, filter, catFilter, totalDone, total, onFilterChange, onCatFilterChange, onOpenSettings }: Props) {
   const progress = total > 0 ? (totalDone / total) * 100 : 0;
 
   return (
@@ -41,6 +42,12 @@ export default function Header({ categories, filter, catFilter, totalDone, total
             </Text>
           </TouchableOpacity>
         ))}
+
+        <View style={styles.flexSpacer} />
+
+        <TouchableOpacity onPress={onOpenSettings} style={styles.gearBtn} accessibilityLabel="Settings">
+          <Text style={styles.gearIcon}>⚙</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Row 2: Category chips (horizontal scroll if needed) */}
@@ -138,4 +145,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1,
   },
+  flexSpacer: { flex: 1 },
+  gearBtn: { paddingHorizontal: 6, paddingVertical: 2 },
+  gearIcon: { color: theme.cream3, fontSize: 18 },
 });

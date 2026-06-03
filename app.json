@@ -3,6 +3,7 @@
     "name": "minido",
     "slug": "minido",
     "version": "1.0.0",
+    "scheme": "minido",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -31,7 +32,15 @@
     },
     "plugins": [
       "expo-sqlite",
-      "@react-native-community/datetimepicker"
-    ]
+      "@react-native-community/datetimepicker",
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "googleAuth": {
+        "androidClientId": "210743822421-l20p017calemlnd4o5c1vn39tf4udamp.apps.googleusercontent.com",
+        "webClientId": "210743822421-gic77toltpitpom6ue85ee146mp7bits.apps.googleusercontent.com"
+      }
+    }
   }
 }

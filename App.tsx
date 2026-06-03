@@ -24,6 +24,7 @@ import AddPanel from './src/components/AddPanel';
 import CategoryModal from './src/components/CategoryModal';
 import CategoryPicker from './src/components/CategoryPicker';
 import Header from './src/components/Header';
+import SettingsModal from './src/components/SettingsModal';
 import TaskList from './src/components/TaskList';
 
 function todayISO() {
@@ -58,6 +59,7 @@ export default function App() {
   const [editText, setEditText] = useState('');
   const [catPickerTaskId, setCatPickerTaskId] = useState<string | null>(null);
   const [showCatModal, setShowCatModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const today = todayISO();
 
@@ -194,6 +196,7 @@ export default function App() {
             total={tasks.length}
             onFilterChange={setFilter}
             onCatFilterChange={setCatFilter}
+            onOpenSettings={() => setShowSettings(true)}
           />
 
           <TaskList
@@ -250,6 +253,8 @@ export default function App() {
             onClose={() => setShowCatModal(false)}
             onCreate={handleAddCategory}
           />
+
+          <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
         </View>
       </SafeAreaView>
     </GestureHandlerRootView>
