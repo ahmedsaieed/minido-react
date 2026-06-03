@@ -19,6 +19,7 @@ import {
   createCategory as dbCreateCategory,
 } from './src/services/db';
 import { useTaskStore } from './src/store/taskStore';
+import { useSyncTriggers } from './src/hooks/useSyncTriggers';
 import { Category, Task } from './src/types';
 import AddPanel from './src/components/AddPanel';
 import CategoryModal from './src/components/CategoryModal';
@@ -44,6 +45,9 @@ const IS_WEB = Platform.OS === 'web';
 export default function App() {
   const [fontsLoaded] = useFonts({ DMMono_300Light, DMMono_400Regular, DMMono_500Medium });
   const [dbReady, setDbReady] = useState(false);
+
+  // Auto-sync triggers: mount + foreground + debounced mutations.
+  useSyncTriggers();
 
   const {
     tasks, categories,

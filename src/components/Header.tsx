@@ -1,6 +1,7 @@
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { Category } from '../types';
+import { useSyncStore } from '../store/syncStore';
 import MinidoLogo from './MinidoLogo';
 
 interface Props {
@@ -16,6 +17,10 @@ interface Props {
 
 export default function Header({ categories, filter, catFilter, totalDone, total, onFilterChange, onCatFilterChange, onOpenSettings }: Props) {
   const progress = total > 0 ? (totalDone / total) * 100 : 0;
+  const syncStatus = useSyncStore((s) => s.status);
+  const syncNow = useSyncStore((s) => s.syncNow);
+  const syncGlyph = syncStatus === 'syncing' ? '⟳' : syncStatus === 'error' ? '⚠' : '';
+  const syncColor = syncStatus === 'syncing' ? theme.accent : syncStatus === 'error' ? '#d48a8a' : theme.cream3;
 
   return (
     <View style={styles.root}>
@@ -67,8 +72,13 @@ export default function Header({ categories, filter, catFilter, totalDone, total
         })}
       </ScrollView>
 
-      {/* Gear sits in the top-right corner so it doesn't fight for space
-          with the logo / progress / filter pills on narrow screens. */}
+      {/* Sync status + gear sit in the top-right corner so they don't fight
+          for space with the logo / progress / filter pills on narrow screens. */}
+      {!!syncGlyph && (
+        <TouchableOpacity onPress={() => syncNow()} style={styles.syncBtn} accessibilityLabel="Sync status">
+          <Text style={[styles.syncGlyph, { color: syncColor }]}>{syncGlyph}</Text>
+        </TouchableOpacity>
+      )}
       <TouchableOpacity onPress={onOpenSettings} style={styles.gearBtn} accessibilityLabel="Settings">
         <Text style={styles.gearIcon}>⚙</Text>
       </TouchableOpacity>
@@ -154,4 +164,13 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
   },
   gearIcon: { color: theme.cream3, fontSize: 20 },
+  syncBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 46,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: theme.bg,
+  },
+  syncGlyph: { fontSize: 16 },
 });

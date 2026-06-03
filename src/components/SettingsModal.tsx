@@ -1,57 +1,28 @@
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { theme } from '../constants/theme';
 import { useGoogleAuth } from '../hooks/useGoogleAuth';
-import { createSyncFile, downloadJson, findSyncFile, listAppData, updateSyncFile } from '../services/drive';
+import { useSyncStore } from '../store/syncStore';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
-interface DriveTestResult {
-  ok: boolean;
-  log: string[];
+function formatRelative(ms: number | null): string {
+  if (ms == null) return 'never';
+  const delta = Date.now() - ms;
+  if (delta < 60_000) return 'just now';
+  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+  return `${Math.floor(delta / 86_400_000)}d ago`;
 }
 
 export default function SettingsModal({ visible, onClose }: Props) {
-  const { ready, isSignedIn, user, signIn, signOut, error } = useGoogleAuth();
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<DriveTestResult | null>(null);
-
-  const runDriveTest = async () => {
-    setTesting(true);
-    const log: string[] = [];
-    const t0 = Date.now();
-    const push = (s: string) => { log.push(`${((Date.now() - t0) / 1000).toFixed(2)}s  ${s}`); };
-    try {
-      push('list appDataFolder…');
-      const before = await listAppData();
-      push(`  found ${before.length} file(s)`);
-
-      const probe = { test: true, at: new Date().toISOString(), nonce: Math.random().toString(36).slice(2) };
-      let file = await findSyncFile();
-      if (file) {
-        push(`update existing file (${file.id})…`);
-        file = await updateSyncFile(file.id, probe);
-      } else {
-        push('create sync file…');
-        file = await createSyncFile(probe);
-      }
-      push(`  id=${file.id} version=${file.version ?? '?'}`);
-
-      push('download…');
-      const fetched = await downloadJson<typeof probe>(file.id);
-      push(`  nonce matches? ${fetched.nonce === probe.nonce ? 'yes' : 'NO!'}`);
-
-      setTestResult({ ok: true, log });
-    } catch (e: any) {
-      log.push(`ERROR: ${e?.message ?? String(e)}`);
-      setTestResult({ ok: false, log });
-    } finally {
-      setTesting(false);
-    }
-  };
+  const { ready, isSignedIn, user, signIn, signOut, error: authError } = useGoogleAuth();
+  const status = useSyncStore((s) => s.status);
+  const lastSyncedAt = useSyncStore((s) => s.lastSyncedAt);
+  const lastError = useSyncStore((s) => s.lastError);
+  const syncNow = useSyncStore((s) => s.syncNow);
 
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
@@ -74,14 +45,33 @@ export default function SettingsModal({ visible, onClose }: Props) {
                 {user?.email ?? 'Signed in'}
               </Text>
               {!!user?.name && <Text style={styles.userSub} numberOfLines={1}>{user.name}</Text>}
+
+              <View style={styles.syncRow}>
+                <Text style={styles.syncStatus}>
+                  {status === 'syncing'
+                    ? '⟳ syncing…'
+                    : status === 'error'
+                    ? '⚠ sync error'
+                    : `✓ synced ${formatRelative(lastSyncedAt)}`}
+                </Text>
+              </View>
+
               <View style={styles.btnRow}>
-                <TouchableOpacity onPress={runDriveTest} disabled={testing} style={styles.btnPrimary}>
-                  <Text style={styles.btnPrimaryText}>{testing ? 'TESTING…' : 'TEST DRIVE'}</Text>
+                <TouchableOpacity
+                  onPress={syncNow}
+                  disabled={status === 'syncing'}
+                  style={styles.btnPrimary}
+                >
+                  <Text style={styles.btnPrimaryText}>
+                    {status === 'syncing' ? 'SYNCING…' : 'SYNC NOW'}
+                  </Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={signOut} style={styles.btnGhost}>
                   <Text style={styles.btnGhostText}>SIGN OUT</Text>
                 </TouchableOpacity>
               </View>
+
+              {!!lastError && <Text style={styles.error}>{lastError}</Text>}
             </View>
           ) : (
             <View>
@@ -95,17 +85,7 @@ export default function SettingsModal({ visible, onClose }: Props) {
             </View>
           )}
 
-          {!!testResult && (
-            <View style={[styles.testBox, !testResult.ok && styles.testBoxErr]}>
-              <ScrollView style={{ maxHeight: 180 }}>
-                {testResult.log.map((line, i) => (
-                  <Text key={i} style={styles.testLine}>{line}</Text>
-                ))}
-              </ScrollView>
-            </View>
-          )}
-
-          {!!error && <Text style={styles.error}>{error}</Text>}
+          {!!authError && <Text style={styles.error}>{authError}</Text>}
         </Pressable>
       </Pressable>
     </Modal>
@@ -141,8 +121,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   userLine: { color: theme.cream, fontFamily: 'monospace', fontSize: 14, marginBottom: 2 },
-  userSub: { color: theme.cream3, fontFamily: 'monospace', fontSize: 12, marginBottom: 14 },
+  userSub: { color: theme.cream3, fontFamily: 'monospace', fontSize: 12, marginBottom: 12 },
   help: { color: theme.cream2, fontFamily: 'monospace', fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  syncRow: { marginBottom: 14 },
+  syncStatus: { color: theme.cream2, fontFamily: 'monospace', fontSize: 11 },
   btnRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
   btnPrimary: {
     backgroundColor: theme.accent,
@@ -161,15 +143,5 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   btnGhostText: { color: theme.cream3, fontFamily: 'monospace', fontSize: 12, letterSpacing: 2 },
-  testBox: {
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 4,
-    backgroundColor: theme.surfaceDeep,
-    padding: 10,
-  },
-  testBoxErr: { borderColor: '#d48a8a' },
-  testLine: { color: theme.cream2, fontFamily: 'monospace', fontSize: 11, lineHeight: 15 },
   error: { color: '#d48a8a', fontFamily: 'monospace', fontSize: 11, marginTop: 14, lineHeight: 16 },
 });

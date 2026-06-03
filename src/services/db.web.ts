@@ -19,6 +19,8 @@ export function getTasksByDate(_iso: string): Task[] { return []; }
 export function createTask(_task: Task): Task { return _task; }
 export function updateTask(_id: string, _changes: Partial<Task>): Task { return null as any; }
 export function deleteTask(_id: string): void {}
+export function upsertTask(_task: Task): void {}
+export function upsertCategory(_cat: Category): void {}
 
 export function getSyncState(): SyncState {
   return { remoteFileId: null, remoteRevision: null, lastSyncedAt: null, lastError: null };

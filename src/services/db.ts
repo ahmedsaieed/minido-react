@@ -191,6 +191,36 @@ export function updateTask(id: string, changes: Partial<Omit<Task, 'id' | 'creat
   return db.getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [id])!;
 }
 
+// Upsert variants — used by the sync engine when merging remote rows into
+// local state. They write the exact `updatedAt` and `deletedAt` from the
+// merge result (don't bump updatedAt).
+export function upsertTask(task: Task): void {
+  getDb().runSync(
+    `INSERT OR REPLACE INTO tasks
+       (id, text, categoryCode, isoDate, done, sortOrder, createdAt, updatedAt, deletedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      task.id,
+      task.text,
+      task.categoryCode,
+      task.isoDate,
+      task.done ? 1 : 0,
+      task.sortOrder,
+      task.createdAt,
+      task.updatedAt,
+      task.deletedAt ?? null,
+    ],
+  );
+}
+
+export function upsertCategory(cat: Category): void {
+  getDb().runSync(
+    `INSERT OR REPLACE INTO categories (code, color, title, updatedAt, deletedAt)
+     VALUES (?, ?, ?, ?, ?)`,
+    [cat.code, cat.color, cat.title, cat.updatedAt, cat.deletedAt ?? null],
+  );
+}
+
 export function deleteTask(id: string): void {
   const now = new Date().toISOString();
   getDb().runSync(
