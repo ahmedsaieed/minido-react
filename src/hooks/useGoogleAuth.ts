@@ -14,7 +14,6 @@ import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import {
   clearTokens,
-  clientIdForCurrentPlatform,
   fetchUserInfo,
   getGoogleAuthConfig,
   GoogleUser,
@@ -27,14 +26,18 @@ import {
 // Required for the browser-based flow to complete on web reload.
 WebBrowser.maybeCompleteAuthSession();
 
-const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
-
 const SCOPES = [
   'openid',
   'profile',
   'email',
   'https://www.googleapis.com/auth/drive.appdata',
 ];
+
+// Stable extra params object. CRITICAL: if this is recreated each render,
+// Google.useAuthRequest regenerates the underlying AuthRequest and with it
+// the PKCE code_verifier, so by exchange time `request.codeVerifier` no
+// longer matches the code_challenge Google saw → invalid_grant.
+const EXTRA_PARAMS = { access_type: 'offline', prompt: 'consent' } as const;
 
 export interface UseGoogleAuth {
   ready: boolean;            // hook has finished its initial load
@@ -58,10 +61,9 @@ export function useGoogleAuth(): UseGoogleAuth {
     webClientId: config.webClientId,
     scopes: SCOPES,
     responseType: 'code',
-    // Asks Google for a refresh token. `prompt=consent` makes sure the
-    // user re-consents every time so we actually get one (Google
-    // suppresses re-consent silently otherwise on subsequent signs-ins).
-    extraParams: { access_type: 'offline', prompt: 'consent' },
+    // EXTRA_PARAMS is module-level so its identity is stable; see comment
+    // on the constant.
+    extraParams: EXTRA_PARAMS as any,
   });
 
   // Initial load: do we already have stored tokens?
@@ -76,80 +78,52 @@ export function useGoogleAuth(): UseGoogleAuth {
     })();
   }, []);
 
-  // When the OAuth round-trip returns, exchange the auth code for tokens.
-  // Doing the POST by hand (rather than AuthSession.exchangeCodeAsync) so we
-  // can log the exact request/response and surface Google's error body
-  // verbatim if anything goes wrong.
+  // When the OAuth round-trip returns, the Google provider has already
+  // exchanged the auth code internally (its shouldAutoExchangeCode defaults
+  // to true), so the tokens are sitting on response.authentication. We must
+  // NOT re-exchange the code ourselves — it's single-use, and a second
+  // attempt yields invalid_grant.
   useEffect(() => {
     (async () => {
-      if (!response || !request) return;
-      console.log('[auth] response.type=', response.type, 'redirectUri=', request.redirectUri);
+      if (!response) return;
+      console.log('[auth] response.type=', response.type);
       if (response.type !== 'success') {
         if (response.type === 'error') setError(response.error?.message ?? 'Sign-in failed');
         return;
       }
-      const code = response.params?.code;
-      const codeVerifier = (request as any).codeVerifier as string | undefined;
-      console.log('[auth] code present?', !!code, 'codeVerifier present?', !!codeVerifier);
-      if (!code) {
-        setError('No authorization code returned');
-        return;
-      }
-      const clientId = clientIdForCurrentPlatform();
-      if (!clientId) {
-        setError('No Google client_id configured for this platform');
+      const auth = (response as any).authentication as
+        | { accessToken: string; refreshToken?: string | null; expiresIn?: number; scope?: string }
+        | null;
+      if (!auth?.accessToken) {
+        console.warn('[auth] success but no authentication yet — waiting for next render');
         return;
       }
 
       try {
-        const body = new URLSearchParams({
-          grant_type: 'authorization_code',
-          code,
-          client_id: clientId,
-          redirect_uri: request.redirectUri,
-          ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
-        });
-        console.log('[auth] exchanging:', body.toString());
-        const tokenRes = await fetch(TOKEN_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: body.toString(),
-        });
-        const tokenText = await tokenRes.text();
-        console.log('[auth] token endpoint', tokenRes.status, tokenText);
-        if (!tokenRes.ok) {
-          throw new Error(`Token exchange ${tokenRes.status}: ${tokenText}`);
-        }
-        const json = JSON.parse(tokenText) as {
-          access_token: string;
-          refresh_token?: string;
-          expires_in: number;
-          scope?: string;
-        };
-
         let user: GoogleUser | undefined;
         try {
-          user = await fetchUserInfo(json.access_token);
+          user = await fetchUserInfo(auth.accessToken);
         } catch (e) {
           console.warn('[auth] userinfo failed', e);
         }
 
         const next: Tokens = {
-          accessToken: json.access_token,
-          refreshToken: json.refresh_token ?? null,
-          expiresAt: Date.now() + json.expires_in * 1000,
-          scope: json.scope ?? SCOPES.join(' '),
+          accessToken: auth.accessToken,
+          refreshToken: auth.refreshToken ?? null,
+          expiresAt: Date.now() + (auth.expiresIn ?? 3600) * 1000,
+          scope: auth.scope ?? SCOPES.join(' '),
           user,
         };
         await saveTokens(next);
         setTokens(next);
         setError(null);
+        console.log('[auth] signed in as', user?.email ?? '(no userinfo)');
       } catch (e: any) {
-        console.warn('[auth] exchange failed', e);
+        console.warn('[auth] post-exchange failed', e);
         setError(e?.message ?? String(e));
       }
     })();
-  }, [response, request]);
+  }, [response]);
 
   const signIn = useCallback(async () => {
     setError(null);
