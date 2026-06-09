@@ -142,10 +142,16 @@ function setSyncError(msg: string): void {
 // tasks/categories entirely; treat them as empty so the next sync simply
 // overwrites them with the real schema.
 function normalizeAppData(raw: any): AppData {
+  // Coerce task.done to boolean — Android may have uploaded it as 0/1 since
+  // SQLite stores it that way. Without this, web renders literal "0" inside
+  // checkboxes via JSX shortcircuit (`{task.done && <X/>}` → `{0}` → "0").
+  const tasks: Task[] = Array.isArray(raw?.tasks)
+    ? raw.tasks.map((t: any) => ({ ...t, done: t?.done === 1 || t?.done === true }))
+    : [];
   return {
     version: typeof raw?.version === 'number' ? raw.version : 0,
     lastModified: typeof raw?.lastModified === 'string' ? raw.lastModified : '',
-    tasks: Array.isArray(raw?.tasks) ? raw.tasks : [],
+    tasks,
     categories: Array.isArray(raw?.categories) ? raw.categories : [],
   };
 }

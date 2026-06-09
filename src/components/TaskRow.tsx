@@ -148,11 +148,11 @@ export default function TaskRow({
           <TouchableOpacity
             style={[
               styles.checkbox,
-              task.done && { borderColor: category.color, backgroundColor: category.color + '20' },
+              !!task.done && { borderColor: category.color, backgroundColor: category.color + '20' },
             ]}
             onPress={onToggle}
           >
-            {task.done && <Text style={[styles.checkmark, { color: category.color }]}>✓</Text>}
+            {!!task.done && <Text style={[styles.checkmark, { color: category.color }]}>✓</Text>}
           </TouchableOpacity>
 
           {/* Category badge */}
@@ -178,7 +178,7 @@ export default function TaskRow({
           ) : (
             <TouchableOpacity style={styles.textWrap} onPress={onEditStart}>
               <Text
-                style={[styles.taskText, task.done && styles.taskTextDone]}
+                style={[styles.taskText, !!task.done && styles.taskTextDone]}
                 numberOfLines={2}
               >
                 {task.text}

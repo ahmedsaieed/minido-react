@@ -133,25 +133,38 @@ export function deleteCategory(code: string): void {
 
 // ── Tasks ─────────────────────────────────────────────────────────────────────
 
+// SQLite stores `done` as INTEGER (0/1); the Task type expects boolean.
+// Without this coercion downstream `{task.done && <X/>}` JSX expressions
+// evaluate to literal 0 on web (renders as "0" text in the DOM).
+function hydrateTaskRow(r: any): Task {
+  return { ...r, done: r.done === 1 || r.done === true };
+}
+
 export function getTasks(): Task[] {
-  return getDb().getAllSync<Task>(
-    'SELECT * FROM tasks WHERE deletedAt IS NULL ORDER BY isoDate ASC, sortOrder ASC'
-  );
+  return getDb()
+    .getAllSync<Task>(
+      'SELECT * FROM tasks WHERE deletedAt IS NULL ORDER BY isoDate ASC, sortOrder ASC',
+    )
+    .map(hydrateTaskRow);
 }
 
 export function getTaskTombstones(): Task[] {
-  return getDb().getAllSync<Task>('SELECT * FROM tasks WHERE deletedAt IS NOT NULL');
+  return getDb()
+    .getAllSync<Task>('SELECT * FROM tasks WHERE deletedAt IS NOT NULL')
+    .map(hydrateTaskRow);
 }
 
 export function getAllTasksIncludingDeleted(): Task[] {
-  return getDb().getAllSync<Task>('SELECT * FROM tasks');
+  return getDb().getAllSync<Task>('SELECT * FROM tasks').map(hydrateTaskRow);
 }
 
 export function getTasksByDate(isoDate: string): Task[] {
-  return getDb().getAllSync<Task>(
-    'SELECT * FROM tasks WHERE isoDate = ? AND deletedAt IS NULL ORDER BY sortOrder ASC',
-    [isoDate]
-  );
+  return getDb()
+    .getAllSync<Task>(
+      'SELECT * FROM tasks WHERE isoDate = ? AND deletedAt IS NULL ORDER BY sortOrder ASC',
+      [isoDate],
+    )
+    .map(hydrateTaskRow);
 }
 
 export function createTask(task: Task): Task {
@@ -171,7 +184,7 @@ export function createTask(task: Task): Task {
       task.updatedAt,
     ]
   );
-  return getDb().getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [task.id])!;
+  return hydrateTaskRow(getDb().getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [task.id])!);
 }
 
 export function updateTask(id: string, changes: Partial<Omit<Task, 'id' | 'createdAt'>>): Task {
@@ -179,7 +192,7 @@ export function updateTask(id: string, changes: Partial<Omit<Task, 'id' | 'creat
   const merged = { ...changes, updatedAt: changes.updatedAt ?? new Date().toISOString() };
   const fields = Object.keys(merged) as (keyof typeof merged)[];
   if (fields.length === 0) {
-    return db.getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [id])!;
+    return hydrateTaskRow(db.getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [id])!);
   }
   const setClauses = fields.map((f) => `${f} = ?`).join(', ');
   const values: (string | number | null)[] = fields.map((f) => {
@@ -188,7 +201,7 @@ export function updateTask(id: string, changes: Partial<Omit<Task, 'id' | 'creat
     return (v ?? null) as string | number | null;
   });
   db.runSync(`UPDATE tasks SET ${setClauses} WHERE id = ?`, [...values, id]);
-  return db.getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [id])!;
+  return hydrateTaskRow(db.getFirstSync<Task>('SELECT * FROM tasks WHERE id = ?', [id])!);
 }
 
 // Upsert variants — used by the sync engine when merging remote rows into
