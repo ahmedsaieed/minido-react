@@ -24,7 +24,7 @@ minido is a personal task manager built around one idea: **categorise without fr
 | Animations | `react-native-reanimated` v3 |
 | Gestures | `react-native-gesture-handler` |
 | Drag reorder | `react-native-draggable-flatlist` |
-| Notifications | `expo-notifications` *(deferred — Phase 5)* |
+| Notifications | `expo-notifications` *(deferred — Phase 6)* |
 
 **Platform targets:**
 
@@ -357,12 +357,33 @@ All tests must pass before Phase 2 begins. Run with `npx jest --coverage`; targe
 - Schema migration via `version` field
 - Web: OAuth popup flow via `@react-native-google-signin/google-signin` web support
 
-### Phase 5 — Notifications *(deferred)*
+### Phase 5 — Category management, Android polish, web production
+**5A — Category management**
+- Manage categories in a screen opened from `SettingsModal`: list every active category with its code, colour and title
+- Edit a category's title and colour. The code stays fixed, because tasks reference it
+- Delete a category through the UI. The store's `deleteCategory` and its tombstones already exist but nothing calls them yet
+  - Tasks in a deleted category are moved to `GEN` before the category is tombstoned
+  - `GEN` cannot be deleted
+- Optional: drag to reorder categories in the picker
+- Every edit bumps `updatedAt` so that sync merges it last-write-wins
+
+**5B — Android UI updates**
+- *(Scope to be defined — list the specific changes here)*
+
+**5C — Web production hosting**
+- Build a static production bundle with `npx expo export -p web` (output goes to `dist/`)
+- Choose a host: EAS Hosting, GitHub Pages or Netlify
+- Deploy from GitHub Actions on push to `master`, alongside `android-release.yml`
+- Add the production origin to the Google OAuth web client's authorised JavaScript origins and redirect URIs
+- Keep the client ID and other config in build-time env vars (`EXPO_PUBLIC_*`), not hardcoded
+- Smoke-test sign-in and a Drive sync round-trip on the production URL
+
+### Phase 6 — Notifications *(deferred)*
 - `expo-notifications`
 - Daily digest for overdue tasks
 - Optional per-task reminders
 
-### Phase 6 — iOS *(lowest priority)*
+### Phase 7 — iOS *(lowest priority)*
 - Audit all components for iOS-specific rendering differences
 - Test swipe and drag on iOS simulator and physical device
 - Handle iOS keyboard avoidance for `AddPanel` bottom sheet
