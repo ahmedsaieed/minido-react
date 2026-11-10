@@ -371,12 +371,32 @@ All tests must pass before Phase 2 begins. Run with `npx jest --coverage`; targe
 - *(Scope to be defined — list the specific changes here)*
 
 **5C — Web production hosting**
-- Build a static production bundle with `npx expo export -p web` (output goes to `dist/`)
-- Choose a host: EAS Hosting, GitHub Pages or Netlify
-- Deploy from GitHub Actions on push to `master`, alongside `android-release.yml`
-- Add the production origin to the Google OAuth web client's authorised JavaScript origins and redirect URIs
-- Keep the client ID and other config in build-time env vars (`EXPO_PUBLIC_*`), not hardcoded
-- Smoke-test sign-in and a Drive sync round-trip on the production URL
+
+*Context:* single user (the owner) for at least the next 6 months. The priority is protecting the owner's Google account, not convenience.
+
+*Host:* **Cloudflare Pages**, serving a static bundle only.
+- Build with `npx expo export -p web` (output goes to `dist/`). No server rendering is needed, because the app is local-first.
+- Deploy from a GitHub Actions workflow on push to `master`, alongside `android-release.yml`.
+- Domain: start on the free `*.pages.dev` subdomain. A custom domain can be added later; it only changes the OAuth origins.
+- No third-party scripts, analytics or ads on the site. Web tokens live in `localStorage`, so script injection is the main way they could be stolen.
+
+*Auth, now (option A):* ship the current web flow, which includes the client secret.
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_SECRET` is inlined into the public bundle. It identifies the app, not the user, so it can't be used to access the account. Its only misuse is phishing with a fake minido consent screen, which the next point blocks.
+- Keep the OAuth consent screen in **Testing** mode, with the owner's email as the **only** test user. Google refuses sign-in for everyone else.
+  - Known cost: refresh tokens expire after 7 days, so the app needs re-authenticating about weekly on each device, Android included.
+- Scopes stay limited to `openid`, `profile`, `email` and `drive.appdata`. **Never widen them.** A leaked token then exposes only the app's hidden Drive folder, name and email.
+- Add the production origin to the web OAuth client's authorised JavaScript origins and redirect URIs.
+- Inject the client ID and secret from GitHub Actions secrets at build time. Never commit them.
+
+*Auth, before adding any other user (option B):*
+- Add a Cloudflare Pages Function as a token proxy that holds the client secret and performs the code exchange and token refresh. Remove the secret from the bundle.
+- Then move the consent screen to **In production**, which ends the 7-day expiry.
+
+*Owner's account hygiene (outside the app):*
+- Turn on a passkey or 2-step verification on the Google account.
+- Check myaccount.google.com → Security → Third-party connections now and then, and revoke minido there if anything looks wrong.
+
+*Done when:* sign-in and a Drive sync round-trip both work on the production URL, Android and web see each other's changes, and a second Google account is refused at the consent screen.
 
 ### Phase 6 — Notifications *(deferred)*
 - `expo-notifications`
