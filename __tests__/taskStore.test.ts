@@ -139,6 +139,52 @@ test('deleteCategory removes only the targeted category', () => {
   expect(result.current.categories[0].code).toBe('BBB');
 });
 
+test('deleteCategory moves its tasks to GEN and bumps their updatedAt', () => {
+  const { result } = renderHook(() => useTaskStore());
+  const old = '2020-01-01T00:00:00.000Z';
+  act(() => {
+    result.current.addCategory(makeCat({ code: 'GEN' }));
+    result.current.addCategory(makeCat({ code: 'WRK' }));
+    result.current.addTask(makeTask({ id: 'w', categoryCode: 'WRK', updatedAt: old }));
+    result.current.addTask(makeTask({ id: 'g', categoryCode: 'GEN', updatedAt: old }));
+  });
+  act(() => { result.current.deleteCategory('WRK'); });
+  const w = result.current.tasks.find((t) => t.id === 'w')!;
+  const g = result.current.tasks.find((t) => t.id === 'g')!;
+  expect(w.categoryCode).toBe('GEN');
+  expect(w.updatedAt > old).toBe(true);
+  expect(g.updatedAt).toBe(old); // untouched
+});
+
+test('deleteCategory refuses to delete GEN', () => {
+  const { result } = renderHook(() => useTaskStore());
+  act(() => { result.current.addCategory(makeCat({ code: 'GEN' })); });
+  act(() => { result.current.deleteCategory('GEN'); });
+  expect(result.current.categories.map((c) => c.code)).toEqual(['GEN']);
+  expect(result.current.tombstones.categories).toHaveLength(0);
+});
+
+test('addCategory revives a deleted code and drops its tombstone', () => {
+  const { result } = renderHook(() => useTaskStore());
+  act(() => { result.current.addCategory(makeCat({ code: 'REV', title: 'Old' })); });
+  act(() => { result.current.deleteCategory('REV'); });
+  act(() => { result.current.addCategory(makeCat({ code: 'REV', title: 'New' })); });
+  expect(result.current.categories.find((c) => c.code === 'REV')?.title).toBe('New');
+  expect(result.current.tombstones.categories.find((c) => c.code === 'REV')).toBeUndefined();
+});
+
+// ── updateCategory ────────────────────────────────────────────────────────────
+
+test('updateCategory changes title/colour and refreshes updatedAt', () => {
+  const { result } = renderHook(() => useTaskStore());
+  act(() => { result.current.addCategory(makeCat({ code: 'EDT', title: 'Before', color: '#111' })); });
+  act(() => { result.current.updateCategory('EDT', { title: 'After', color: '#222' }); });
+  const cat = result.current.categories.find((c) => c.code === 'EDT')!;
+  expect(cat.title).toBe('After');
+  expect(cat.color).toBe('#222');
+  expect(cat.updatedAt > '1970-01-01T00:00:00.000Z').toBe(true);
+});
+
 // ── setTasks / setCategories ──────────────────────────────────────────────────
 
 test('setTasks replaces the task list wholesale', () => {

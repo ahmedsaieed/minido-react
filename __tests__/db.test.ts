@@ -164,6 +164,31 @@ test('db.createCategory revives a previously-deleted code', () => {
   expect(db.getCategoryTombstones().find((c: { code: string }) => c.code === 'REV')).toBeUndefined();
 });
 
+test('db.updateCategory changes title/colour and keeps the given updatedAt', () => {
+  const db = loadDb();
+  db.initDb();
+  db.createCategory({ code: 'EDT', color: '#111', title: 'Before', updatedAt: '2026-06-01T00:00:00.000Z' });
+  const ts = '2026-07-01T00:00:00.000Z';
+  db.updateCategory('EDT', { title: 'After', color: '#222', updatedAt: ts });
+  const found = db.getCategories().find((c: { code: string }) => c.code === 'EDT');
+  expect(found).toMatchObject({ title: 'After', color: '#222', updatedAt: ts });
+});
+
+test('db.deleteCategory with reassignTo moves active tasks to the fallback', () => {
+  const db = loadDb();
+  db.initDb();
+  db.seedDefaults();
+  const a = makeTask({ id: 'a', categoryCode: 'WRK' });
+  const b = makeTask({ id: 'b', categoryCode: 'PRS' });
+  db.createTask(a);
+  db.createTask(b);
+  db.deleteCategory('WRK', 'GEN');
+  const tasks = db.getTasks();
+  expect(tasks.find((t: { id: string }) => t.id === 'a')?.categoryCode).toBe('GEN');
+  expect(tasks.find((t: { id: string }) => t.id === 'b')?.categoryCode).toBe('PRS');
+  expect(db.getCategories().find((c: { code: string }) => c.code === 'WRK')).toBeUndefined();
+});
+
 // ── sync_state ────────────────────────────────────────────────────────────────
 
 test('db.getSyncState returns an empty record initially', () => {

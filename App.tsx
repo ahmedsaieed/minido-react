@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -17,8 +17,10 @@ import {
   updateTask as dbUpdateTask,
   deleteTask as dbDeleteTask,
   createCategory as dbCreateCategory,
+  updateCategory as dbUpdateCategory,
+  deleteCategory as dbDeleteCategory,
 } from './src/services/db';
-import { useTaskStore } from './src/store/taskStore';
+import { FALLBACK_CATEGORY, useTaskStore } from './src/store/taskStore';
 import { useSyncTriggers } from './src/hooks/useSyncTriggers';
 import { Category, Task } from './src/types';
 import AddPanel from './src/components/AddPanel';
@@ -54,6 +56,7 @@ export default function App() {
     setTasks, setCategories, setTombstones,
     addTask, updateTask, deleteTask,
     toggleDone, moveTask, changeCategory, addCategory,
+    updateCategory, deleteCategory,
   } = useTaskStore();
 
   const [filter, setFilter] = useState<'all' | 'todo' | 'done'>('todo');
@@ -162,6 +165,27 @@ export default function App() {
     addCategory(cat);
   }, []);
 
+  const handleUpdateCategory = useCallback((code: string, changes: Pick<Category, 'title' | 'color'>) => {
+    updateCategory(code, changes);
+    if (!IS_WEB) {
+      const updated = useTaskStore.getState().categories.find((c) => c.code === code);
+      try { dbUpdateCategory(code, { ...changes, updatedAt: updated?.updatedAt }); } catch (e) { console.warn(e); }
+    }
+  }, []);
+
+  const handleDeleteCategory = useCallback((code: string) => {
+    if (code === FALLBACK_CATEGORY) return;
+    if (!IS_WEB) { try { dbDeleteCategory(code, FALLBACK_CATEGORY); } catch (e) { console.warn(e); } }
+    deleteCategory(code);
+    setCatFilter((f) => (f === code ? null : f));
+  }, []);
+
+  const taskCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of tasks) counts[t.categoryCode] = (counts[t.categoryCode] ?? 0) + 1;
+    return counts;
+  }, [tasks]);
+
   const handleReorder = useCallback((reordered: Task[]) => {
     const now = new Date().toISOString();
     // Bump updatedAt on any row whose position/day actually changed so sync
@@ -258,7 +282,15 @@ export default function App() {
             onCreate={handleAddCategory}
           />
 
-          <SettingsModal visible={showSettings} onClose={() => setShowSettings(false)} />
+          <SettingsModal
+            visible={showSettings}
+            onClose={() => setShowSettings(false)}
+            categories={categories}
+            taskCounts={taskCounts}
+            onCreateCategory={handleAddCategory}
+            onUpdateCategory={handleUpdateCategory}
+            onDeleteCategory={handleDeleteCategory}
+          />
         </View>
       </SafeAreaView>
     </GestureHandlerRootView>

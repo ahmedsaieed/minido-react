@@ -24,8 +24,13 @@ interface TaskStore {
   changeCategory: (id: string, categoryCode: string) => void;
 
   addCategory: (category: Category) => void;
+  updateCategory: (code: string, changes: Partial<Pick<Category, 'title' | 'color'>>) => void;
+  // Soft-deletes the category and moves its active tasks to FALLBACK_CATEGORY.
   deleteCategory: (code: string) => void;
 }
+
+// Tasks from a deleted category land here. It can't be deleted itself.
+export const FALLBACK_CATEGORY = 'GEN';
 
 const nowISO = () => new Date().toISOString();
 
@@ -89,17 +94,36 @@ const storeImpl = (set: (fn: (s: TaskStore) => Partial<TaskStore>) => void): Tas
     set((s) => ({
       categories: [
         ...s.categories,
-        { ...category, updatedAt: category.updatedAt ?? nowISO() },
+        { ...category, deletedAt: null, updatedAt: category.updatedAt ?? nowISO() },
       ],
+      // Re-creating a previously deleted code revives it: drop the tombstone,
+      // otherwise sync would see both rows and the tombstone could win.
+      tombstones: {
+        ...s.tombstones,
+        categories: s.tombstones.categories.filter((c) => c.code !== category.code),
+      },
+    })),
+
+  updateCategory: (code, changes) =>
+    set((s) => ({
+      categories: s.categories.map((c) =>
+        c.code === code ? { ...c, ...changes, updatedAt: nowISO() } : c
+      ),
     })),
 
   deleteCategory: (code) =>
     set((s) => {
+      if (code === FALLBACK_CATEGORY) return {};
       const target = s.categories.find((c) => c.code === code);
       if (!target) return {};
       const ts = nowISO();
       return {
         categories: s.categories.filter((c) => c.code !== code),
+        tasks: s.tasks.map((t) =>
+          t.categoryCode === code
+            ? { ...t, categoryCode: FALLBACK_CATEGORY, updatedAt: ts }
+            : t
+        ),
         tombstones: {
           ...s.tombstones,
           categories: [

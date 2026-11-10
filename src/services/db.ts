@@ -115,7 +115,7 @@ export function createCategory(cat: Category): Category {
 
 export function updateCategory(code: string, changes: Partial<Omit<Category, 'code'>>): Category {
   const db = getDb();
-  const merged = { ...changes, updatedAt: new Date().toISOString() };
+  const merged = { ...changes, updatedAt: changes.updatedAt ?? new Date().toISOString() };
   const fields = Object.keys(merged) as (keyof typeof merged)[];
   const setClauses = fields.map((f) => `${f} = ?`).join(', ');
   const values: (string | number | null)[] = fields.map((f) => (merged[f] ?? null) as string | number | null);
@@ -123,9 +123,18 @@ export function updateCategory(code: string, changes: Partial<Omit<Category, 'co
   return db.getFirstSync<Category>('SELECT * FROM categories WHERE code = ?', [code])!;
 }
 
-export function deleteCategory(code: string): void {
+// Soft-deletes the category. If `reassignTo` is given, active tasks in it are
+// moved there first (with updatedAt bumped so the move syncs).
+export function deleteCategory(code: string, reassignTo?: string): void {
+  const db = getDb();
   const now = new Date().toISOString();
-  getDb().runSync(
+  if (reassignTo) {
+    db.runSync(
+      'UPDATE tasks SET categoryCode = ?, updatedAt = ? WHERE categoryCode = ? AND deletedAt IS NULL',
+      [reassignTo, now, code]
+    );
+  }
+  db.runSync(
     'UPDATE categories SET deletedAt = ?, updatedAt = ? WHERE code = ?',
     [now, now, code]
   );

@@ -10,7 +10,7 @@ export function getCategoryTombstones(): Category[] { return []; }
 export function getAllCategoriesIncludingDeleted(): Category[] { return []; }
 export function createCategory(_cat: Category): Category { return _cat; }
 export function updateCategory(_code: string, _changes: Partial<Category>): Category { return null as any; }
-export function deleteCategory(_code: string): void {}
+export function deleteCategory(_code: string, _reassignTo?: string): void {}
 
 export function getTasks(): Task[] { return []; }
 export function getTaskTombstones(): Task[] { return []; }
