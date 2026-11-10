@@ -38,25 +38,28 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      - name: Build debug APK
-        run: cd android && ./gradlew assembleDebug -PbundleInDebug=true --no-daemon
+      # Release variant: the RN Gradle plugin only embeds the JS bundle in
+      # non-debuggable variants (there is no bundleInDebug flag), so a debug
+      # APK would need Metro to run. Signed with the template's debug keystore.
+      - name: Build release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon
 
       - name: Rename APK
         run: |
           VERSION="${GITHUB_REF_NAME:-dev}"
-          mv android/app/build/outputs/apk/debug/app-debug.apk \
-             android/app/build/outputs/apk/debug/minido-${VERSION}.apk
+          mv android/app/build/outputs/apk/release/app-release.apk \
+             android/app/build/outputs/apk/release/minido-${VERSION}.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: minido-apk
-          path: android/app/build/outputs/apk/debug/minido-*.apk
+          path: android/app/build/outputs/apk/release/minido-*.apk
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: minido ${{ github.ref_name }}
-          files: android/app/build/outputs/apk/debug/minido-*.apk
+          files: android/app/build/outputs/apk/release/minido-*.apk
           generate_release_notes: true
