@@ -1,0 +1,15 @@
+# Cloudflare Pages response headers. Expo copies public/ into dist/ on export.
+#
+# The CSP is the main guard for the Google tokens kept in localStorage: only
+# our own scripts may run, and the page may only talk to Google's token and
+# Drive APIs. If a new external host is ever needed, add it here deliberately.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://oauth2.googleapis.com https://www.googleapis.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+# Hashed bundles never change, so cache them forever; index.html stays fresh.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
